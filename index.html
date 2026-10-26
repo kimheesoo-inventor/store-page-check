@@ -56,8 +56,8 @@
 <ol type="a">
   <li><strong>Policy links.</strong> Is there a link to a refund/return policy, shipping policy, privacy policy, terms of service and a contact page? Shopify's default paths (such as <code>/policies/refund-policy</code> and <code>/pages/contact</code>) are recognized.</li>
   <li><strong>Contact details.</strong> Are an email address and a phone number shown on this page? The business address is not judged; the panel only reminds you to check it yourself.</li>
-  <li><strong>Product data.</strong> On a product page, it reads the JSON-LD (structured data) Product and looks for name, image, price, currency, availability, brand, an identifier (gtin, mpn or sku), shippingDetails and hasMerchantReturnPolicy. Several offers or an AggregateOffer are handled.</li>
-  <li><strong>Price match.</strong> If both a JSON-LD price and an <code>og:price:amount</code> meta tag exist, are they the same?</li>
+  <li><strong>Product data.</strong> On a product page, it reads the Product structured data, in JSON-LD and/or microdata (<code>itemtype</code> schema.org/Product), and looks for name, image, price, currency, availability, brand, an identifier (gtin, mpn or sku), shippingDetails and hasMerchantReturnPolicy. Several offers or an AggregateOffer are handled. The panel says which format was found; RDFa is not read.</li>
+  <li><strong>Price match.</strong> If both a product data price and an <code>og:price:amount</code> meta tag exist, are they the same?</li>
   <li><strong>Image alt text.</strong> How many images have a missing or empty alt attribute (decorative images marked <code>role="presentation"</code> or <code>aria-hidden</code> are left out)?</li>
 </ol>
 <p>Every result has a one-line reason and a link to the related Google documentation:
