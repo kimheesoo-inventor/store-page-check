@@ -8,8 +8,8 @@ Not affiliated with Google or Shopify. It does not guarantee Merchant Center app
 
 - Policy links: refund/return, shipping, privacy, terms, contact (Shopify default paths recognized)
 - Contact details: email and phone visible on the page (address is left for you to check)
-- Product JSON-LD: name, image, price, currency, availability, brand, identifier, shippingDetails, hasMerchantReturnPolicy
-- JSON-LD price vs `og:price:amount`
+- Product data, read from JSON-LD and/or microdata (`itemtype` schema.org/Product): name, image, price, currency, availability, brand, identifier, shippingDetails, hasMerchantReturnPolicy. The panel says which format(s) were found; if both exist, JSON-LD values are used and gaps are filled from microdata.
+- Product price vs `og:price:amount`
 - Images with missing or empty alt text
 
 Each item shows OK, Check, or N/A, with a one-line reason and a Google documentation link.
@@ -34,6 +34,7 @@ node build.mjs
 ## Limits
 
 - Reads only the page it runs on; policy pages are not opened.
+- Structured data: JSON-LD and microdata are read. RDFa and microdata that points to elements elsewhere on the page (`itemref`) are not.
 - Sites with a strict Content Security Policy may block the panel.
 - Phone/email detection is pattern-based and can miss or misread.
 - Results are hints for your own review, not a verdict.

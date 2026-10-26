@@ -61,6 +61,57 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return { nodes: nodes, errors: errors };
   }
 
+  /* ---- microdata (itemscope / itemtype / itemprop) ----
+   * The DOM part reads the page into a plain tree: { type: 'http://schema.org/Product', props: [{ name, value } | { name, item }] }.
+   * microdataToNodes() turns that tree into the same shape JSON-LD gives, so one set of checks serves both formats. */
+  var MICRODATA_PRODUCT_RE = /schema\.org\/Product(Group)?(?![A-Za-z0-9])/i;
+  function isProductItemtype(t) { return MICRODATA_PRODUCT_RE.test(String(t || '')); }
+
+  function microdataToNodes(items) {
+    function conv(it, depth) {
+      if (!isObj(it) || depth > 6) return null;
+      var types = String(it.type || '').split(/\s+/).filter(Boolean);
+      var node = { '@type': types.length === 1 ? types[0] : types };
+      asArray(it.props).forEach(function (p) {
+        if (!isObj(p) || !p.name) return;
+        var v = p.item ? conv(p.item, depth + 1) : (p.value === undefined || p.value === null ? '' : String(p.value));
+        if (v === null) return;
+        if (Object.prototype.hasOwnProperty.call(node, p.name)) node[p.name] = asArray(node[p.name]).concat([v]);
+        else node[p.name] = v;
+      });
+      return node;
+    }
+    return asArray(items).map(function (it) { return conv(it, 0); }).filter(Boolean);
+  }
+
+  /* Combine a JSON-LD product with a microdata product. JSON-LD wins; gaps are filled from microdata. */
+  function mergeProducts(ld, md) {
+    if (!ld) return md || null;
+    if (!md) return ld;
+    var merged = {};
+    Object.keys(ld).forEach(function (k) { merged[k] = ld[k]; });
+    Object.keys(md).forEach(function (k) {
+      if (k !== 'offers' && !hasValue(merged[k]) && hasValue(md[k])) merged[k] = md[k];
+    });
+    var lo = flattenOffers(ld);
+    var mo = flattenOffers(md);
+    if (!lo.length) {
+      if (mo.length) merged.offers = mo;
+    } else if (lo.length === mo.length) {
+      merged.offers = lo.map(function (o, i) {
+        var r = {};
+        Object.keys(o).forEach(function (k) { r[k] = hasValue(o[k]) ? o[k] : mo[i][k]; });
+        return r;
+      });
+    }
+    return merged;
+  }
+
+  function formatsText(formats) {
+    var f = asArray(formats);
+    return f.length ? f.join(' + ') : 'none';
+  }
+
   /* Find the Product (or ProductGroup merged with its variants). Returns null if none. */
   function findProduct(nodes) {
     var i;
@@ -148,19 +199,21 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
 
   /* Evaluate Product fields. product may be null. */
   function evaluateProduct(product, pageHint) {
-    var G = 'Product data (JSON-LD)';
+    var G = 'Product data (JSON-LD / microdata)';
     var res = [];
+    var fmt = formatsText(pageHint && pageHint.formats);
     if (!product) {
       var looksLikeProduct = !!(pageHint && pageHint.looksLikeProduct);
       res.push(item(G, 'product-jsonld', 'Product structured data',
         looksLikeProduct ? 'check' : 'na',
         looksLikeProduct
-          ? 'This looks like a product page, but no Product in JSON-LD was found.'
-          : 'No Product JSON-LD and this does not look like a product page. Open a product page to check this.',
+          ? 'This looks like a product page, but no Product in JSON-LD or microdata was found.'
+          : 'No Product in JSON-LD or microdata was found, and this does not look like a product page. Open a product page to check this.',
         DOCS.listing));
       return res;
     }
-    res.push(item(G, 'product-jsonld', 'Product structured data', 'ok', 'Product found in JSON-LD.', DOCS.listing));
+    res.push(item(G, 'product-jsonld', 'Product structured data', 'ok',
+      'Product found in ' + (pageHint && pageHint.formats && pageHint.formats.length ? fmt : 'structured data') + '.', DOCS.listing));
 
     res.push(item(G, 'name', 'name', hasValue(product.name) ? 'ok' : 'check',
       hasValue(product.name) ? 'name is present.' : 'name is missing or empty.', DOCS.listing));
@@ -207,14 +260,14 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var og = parsePrice(ogPrice);
     var lds = asArray(ldPrices).map(parsePrice).filter(function (n) { return n !== null; });
     if (og === null || !lds.length) {
-      return item(G, 'price-match', 'JSON-LD price vs og:price:amount', 'na',
-        'Needs both a JSON-LD price and an og:price:amount meta tag; at least one was not found.', DOCS.misrep);
+      return item(G, 'price-match', 'Product data price vs og:price:amount', 'na',
+        'Needs both a price in the product data (JSON-LD or microdata) and an og:price:amount meta tag; at least one was not found.', DOCS.misrep);
     }
     var match = lds.some(function (p) { return Math.abs(p - og) < 0.005; });
     return match
-      ? item(G, 'price-match', 'JSON-LD price vs og:price:amount', 'ok', 'Both show ' + og.toFixed(2) + '.', DOCS.misrep)
-      : item(G, 'price-match', 'JSON-LD price vs og:price:amount', 'check',
-        'JSON-LD price ' + lds.map(function (p) { return p.toFixed(2); }).join('/') + ' differs from og:price:amount ' + og.toFixed(2) + '.', DOCS.misrep);
+      ? item(G, 'price-match', 'Product data price vs og:price:amount', 'ok', 'Both show ' + og.toFixed(2) + '.', DOCS.misrep)
+      : item(G, 'price-match', 'Product data price vs og:price:amount', 'check',
+        'Product data price ' + lds.map(function (p) { return p.toFixed(2); }).join('/') + ' differs from og:price:amount ' + og.toFixed(2) + '.', DOCS.misrep);
   }
 
   /* Policy link matching. links: [{href, text}] */
@@ -359,16 +412,21 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   /* One call that evaluates everything from plain data. */
   function runChecks(input) {
     var parsed = parseJsonLd(input.jsonLdTexts || []);
-    var product = findProduct(parsed.nodes);
+    var ldProduct = findProduct(parsed.nodes);
+    var mdProduct = findProduct(microdataToNodes(input.microdata || []));
+    var formats = [];
+    if (ldProduct) formats.push('JSON-LD');
+    if (mdProduct) formats.push('microdata');
+    var product = mergeProducts(ldProduct, mdProduct);
     var path = String(input.path || '');
     var looksLikeProduct = /\/products\//i.test(path) || String(input.ogType || '').toLowerCase() === 'product';
     var items = [];
     items = items.concat(matchPolicyLinks(input.links || [], input.host || ''));
     items = items.concat(evaluateContacts(input.text || '', (input.links || []).map(function (l) { return l.href; })));
-    items = items.concat(evaluateProduct(product, { looksLikeProduct: looksLikeProduct }));
+    items = items.concat(evaluateProduct(product, { looksLikeProduct: looksLikeProduct, formats: formats }));
     items.push(comparePrices(product ? collectPrices(product) : [], input.ogPrice));
     items.push(evaluateAlt(input.imgs || []));
-    return { items: items, summary: summarize(items), jsonLdErrors: parsed.errors };
+    return { items: items, summary: summarize(items), jsonLdErrors: parsed.errors, formats: formats };
   }
 
   var core = {
@@ -377,7 +435,8 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
-    summarize: summarize, runChecks: runChecks
+    summarize: summarize, runChecks: runChecks,
+    microdataToNodes: microdataToNodes, mergeProducts: mergeProducts, isProductItemtype: isProductItemtype
   };
 
   if (typeof module === 'object' && module && module.exports) {
@@ -389,6 +448,45 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
   var PANEL_ID = 'svl-store-check-panel';
+
+  /* Read Product microdata into a plain tree. Value order: content attribute, then href/src for links and media, then text. */
+  function microdataValue(e) {
+    if (e.hasAttribute('content')) return e.getAttribute('content') || '';
+    var tag = (e.tagName || '').toLowerCase();
+    if (tag === 'a' || tag === 'link' || tag === 'area') return e.getAttribute('href') || '';
+    if (tag === 'img' || tag === 'source' || tag === 'audio' || tag === 'video' || tag === 'iframe' || tag === 'embed' || tag === 'track') return e.getAttribute('src') || '';
+    if (tag === 'object') return e.getAttribute('data') || '';
+    if (tag === 'time' && e.hasAttribute('datetime')) return e.getAttribute('datetime') || '';
+    if ((tag === 'data' || tag === 'meter') && e.hasAttribute('value')) return e.getAttribute('value') || '';
+    return (e.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function readMicrodataItem(el, depth) {
+    var props = [];
+    function walk(node) {
+      Array.prototype.forEach.call(node.children || [], function (ch) {
+        var names = (ch.getAttribute('itemprop') || '').split(/\s+/).filter(Boolean);
+        var isScope = ch.hasAttribute('itemscope');
+        if (names.length) {
+          names.forEach(function (n) {
+            if (isScope) { if (depth < 5) props.push({ name: n, item: readMicrodataItem(ch, depth + 1) }); }
+            else props.push({ name: n, value: microdataValue(ch) });
+          });
+        }
+        if (!isScope) walk(ch);
+      });
+    }
+    walk(el);
+    return { type: el.getAttribute('itemtype') || '', props: props };
+  }
+
+  function readMicrodata() {
+    var all = Array.prototype.filter.call(document.querySelectorAll('[itemscope][itemtype]'),
+      function (e) { return isProductItemtype(e.getAttribute('itemtype')); });
+    var tops = all.filter(function (e) { return !e.hasAttribute('itemprop'); });
+    if (!tops.length) tops = all.slice(0, 1);
+    return tops.map(function (e) { return readMicrodataItem(e, 0); });
+  }
 
   function readPage() {
     var jsonLdTexts = Array.prototype.map.call(
@@ -415,7 +513,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     });
     var text = document.body ? (document.body.innerText || document.body.textContent || '') : '';
     return {
-      jsonLdTexts: jsonLdTexts, links: links, text: text, imgs: imgs,
+      jsonLdTexts: jsonLdTexts, microdata: readMicrodata(), links: links, text: text, imgs: imgs,
       ogPrice: og ? og.getAttribute('content') : null,
       ogType: ogType ? ogType.getAttribute('content') : null,
       path: location.pathname,
@@ -480,6 +578,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
         el('p', { class: 'm', style: 'margin:2px 0 0' }, [document.createTextNode(it.reason + ' '), docs])
       ]));
     });
+    body.appendChild(el('p', { class: 'm', text: 'Product structured data found: ' + formatsText(result.formats) + '. (These are notes to look at, not verdicts.)' }));
     if (result.jsonLdErrors) {
       body.appendChild(el('p', { class: 'm', text: result.jsonLdErrors + ' JSON-LD block(s) could not be parsed and were skipped.' }));
     }

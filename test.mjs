@@ -95,6 +95,89 @@ t('evaluateProduct: no product on product-looking page -> check', () => {
   assert.equal(c.evaluateProduct(null, { looksLikeProduct: true })[0].status, 'check');
 });
 
+/* ---- microdata (L019) ---- */
+const mdOffer = (extra = []) => ({ type: 'http://schema.org/Offer', props: [
+  { name: 'price', value: '24.00' }, { name: 'priceCurrency', value: 'USD' },
+  { name: 'availability', value: 'http://schema.org/InStock' }, ...extra] });
+const mdGood = { type: 'http://schema.org/Product', props: [
+  { name: 'name', value: 'Candle' }, { name: 'image', value: '//cdn.example/c.jpg' },
+  { name: 'brand', value: 'Glow Co' }, { name: 'sku', value: 'C-1' },
+  { name: 'offers', item: mdOffer() }] };
+const mdNoIds = { type: 'https://schema.org/Product', props: [
+  { name: 'name', value: 'Candle' }, { name: 'offers', item: { type: 'https://schema.org/Offer', props: [{ name: 'price', value: '24.00' }] } }] };
+const base = { links: [], text: '', ogPrice: null, ogType: 'product', path: '/products/candle', imgs: [] };
+
+t('isProductItemtype: http, https and case are accepted; other types are not', () => {
+  assert.ok(c.isProductItemtype('http://schema.org/Product'));
+  assert.ok(c.isProductItemtype('https://schema.org/product'));
+  assert.ok(c.isProductItemtype('HTTP://SCHEMA.ORG/PRODUCT'));
+  assert.ok(!c.isProductItemtype('http://schema.org/ProductModel'));
+  assert.ok(!c.isProductItemtype('http://schema.org/Offer'));
+  assert.ok(!c.isProductItemtype(''));
+});
+t('microdataToNodes: nested offers and repeated props become JSON-LD-like nodes', () => {
+  const nodes = c.microdataToNodes([{ type: 'http://schema.org/Product', props: [
+    { name: 'sku', value: 'A' }, { name: 'sku', value: 'B' }, { name: 'offers', item: mdOffer() }] }]);
+  const p = c.findProduct(nodes);
+  assert.deepEqual(p.sku, ['A', 'B']);
+  assert.equal(c.flattenOffers(p)[0].priceCurrency, 'USD');
+});
+t('runChecks: microdata-only product page is NOT reported as missing structured data', () => {
+  const r = c.runChecks({ ...base, jsonLdTexts: [], microdata: [mdGood] });
+  assert.equal(st(r.items, 'product-jsonld'), 'ok');
+  assert.ok(/Product found in microdata\./.test(r.items.find((i) => i.id === 'product-jsonld').reason));
+  assert.deepEqual(r.formats, ['microdata']);
+  for (const id of ['name', 'image', 'price', 'priceCurrency', 'availability', 'brand', 'identifier']) assert.equal(st(r.items, id), 'ok', id);
+  assert.ok(!r.items.some((i) => /no Product/i.test(i.reason)));
+});
+t('runChecks: microdata price is compared with og:price:amount', () => {
+  assert.equal(st(c.runChecks({ ...base, jsonLdTexts: [], microdata: [mdGood], ogPrice: '24.00' }).items, 'price-match'), 'ok');
+  assert.equal(st(c.runChecks({ ...base, jsonLdTexts: [], microdata: [mdGood], ogPrice: '30.00' }).items, 'price-match'), 'check');
+});
+t('runChecks: microdata with missing identifiers/brand/currency is reported as worth a look', () => {
+  const r = c.runChecks({ ...base, jsonLdTexts: [], microdata: [mdNoIds] });
+  assert.equal(st(r.items, 'product-jsonld'), 'ok');
+  for (const id of ['identifier', 'brand', 'image', 'priceCurrency', 'availability']) assert.equal(st(r.items, id), 'check', id);
+  assert.equal(st(r.items, 'name'), 'ok'); assert.equal(st(r.items, 'price'), 'ok');
+});
+t('runChecks: microdata gtin13 / mpn and shippingDetails / return policy are read', () => {
+  const md = { type: 'http://schema.org/Product', props: [{ name: 'gtin13', value: '4006381333931' },
+    { name: 'offers', item: mdOffer([{ name: 'shippingDetails', item: { type: 'http://schema.org/OfferShippingDetails', props: [{ name: 'shippingRate', value: 'x' }] } },
+      { name: 'hasMerchantReturnPolicy', item: { type: 'http://schema.org/MerchantReturnPolicy', props: [{ name: 'returnPolicyCategory', value: 'x' }] } }]) }] };
+  const r = c.runChecks({ ...base, jsonLdTexts: [], microdata: [md] });
+  assert.equal(st(r.items, 'identifier'), 'ok'); assert.equal(st(r.items, 'shippingDetails'), 'ok'); assert.equal(st(r.items, 'returnPolicy'), 'ok');
+  assert.equal(st(c.runChecks({ ...base, jsonLdTexts: [], microdata: [{ type: 'http://schema.org/Product', props: [{ name: 'mpn', value: 'M1' }] }] }).items, 'identifier'), 'ok');
+});
+t('runChecks: both JSON-LD and microdata are merged and both formats are named', () => {
+  const ld = { '@type': 'Product', name: 'Candle', offers: { price: '24.00' } };
+  const r = c.runChecks({ ...base, jsonLdTexts: [JSON.stringify(ld)], microdata: [mdGood] });
+  const reason = r.items.find((i) => i.id === 'product-jsonld').reason;
+  assert.ok(/Product found in JSON-LD \+ microdata\./.test(reason), reason);
+  assert.deepEqual(r.formats, ['JSON-LD', 'microdata']);
+  for (const id of ['brand', 'identifier', 'image', 'priceCurrency', 'availability']) assert.equal(st(r.items, id), 'ok', id);
+});
+t('runChecks: when both formats exist, JSON-LD values win over microdata', () => {
+  const ld = { '@type': 'Product', name: 'From LD', offers: { price: '10.00', priceCurrency: 'USD', availability: 'x' } };
+  const merged = c.mergeProducts(c.findProduct([ld]), c.findProduct(c.microdataToNodes([mdGood])));
+  assert.equal(merged.name, 'From LD'); assert.equal(merged.brand, 'Glow Co');
+  assert.equal(c.flattenOffers(merged)[0].price, '10.00');
+});
+t('runChecks: JSON-LD only says Product found in JSON-LD', () => {
+  const r = c.runChecks({ ...base, jsonLdTexts: [JSON.stringify(goodProduct)] });
+  assert.ok(/Product found in JSON-LD\./.test(r.items.find((i) => i.id === 'product-jsonld').reason));
+  assert.deepEqual(r.formats, ['JSON-LD']);
+});
+t('runChecks: neither JSON-LD nor microdata on a product page is still reported as missing', () => {
+  const r = c.runChecks({ ...base, jsonLdTexts: [], microdata: [] });
+  assert.equal(st(r.items, 'product-jsonld'), 'check');
+  assert.ok(/no Product in JSON-LD or microdata was found\./.test(r.items.find((i) => i.id === 'product-jsonld').reason));
+  assert.deepEqual(r.formats, []);
+});
+t('runChecks: microdata of a non-Product type does not count as a product', () => {
+  const r = c.runChecks({ ...base, jsonLdTexts: [], microdata: [{ type: 'http://schema.org/Organization', props: [{ name: 'name', value: 'X' }] }] });
+  assert.equal(st(r.items, 'product-jsonld'), 'check');
+});
+
 /* ---- price comparison ---- */
 t('comparePrices: same price -> ok', () => assert.equal(c.comparePrices(['19.99'], '19.99').status, 'ok'));
 t('comparePrices: formatting differences ($, comma) still ok', () => assert.equal(c.comparePrices([1299], '$1,299.00').status, 'ok'));
