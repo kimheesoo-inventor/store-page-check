@@ -470,7 +470,7 @@ t('comparePolicyVersions: Loop-type pair (long footer page that shares, one-line
   assert.ok(r.reason.startsWith('Your footer links to /pages/privacy ('));
   assert.ok(r.reason.includes("Shopify's built-in privacy policy page /policies/privacy-policy also exists (" + loopStd.length + ' characters).'));
   assert.ok(r.reason.includes('the built-in page has "do not share"'));
-  assert.ok(r.reason.endsWith('Customers and reviewers could see either. Consider making them match.'));
+  assert.ok(r.reason.endsWith('Visitors may find either one, and they may say different things. Open both and consider making them match.'));
 });
 t('comparePolicyVersions: same text in both places -> null', () => {
   assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), ok200('  ' + loopFooter + ' ')), null);
@@ -494,11 +494,31 @@ t('comparePolicyVersions: both versions say "do not sell" and "may share" -> no 
   const b = 'We do not sell personal information. We may share it with payment processors. '.repeat(14);
   assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(a), ok200(b)), null);
 });
+/* 22:15 review: "will not share" / curly "don’t share" / "does not share" are negative; "do not sell" alone is not a sharing statement. */
+const longPad = 'We collect your name, address and order details to fulfil orders. '.repeat(10);
+t('comparePolicyVersions: "will not share" vs "do not sell" (both say no) -> null', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(longPad + 'We will not share your information with any third parties.'), ok200(longPad + 'We do not sell your personal information.')), null);
+});
+t('comparePolicyVersions: curly "don\u2019t share ... third parties" and "Acme does not share" vs "do not sell" -> null', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(longPad + 'We don\u2019t share your data with third parties.'), ok200(longPad + 'We do not sell your data.')), null);
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(longPad + 'Acme does not share your data with third parties.'), ok200(longPad + 'We do not sell your data.')), null);
+});
+t('comparePolicyVersions: "do not sell" vs "we share with service providers" -> null (not opposite)', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(longPad + 'We do not sell your personal information.'), ok200(longPad + 'We share your Personal Information with service providers like Shopify.')), null);
+});
+t('comparePolicyVersions: "do not sell or share" vs "we may share ... third parties" -> still check', () => {
+  const r = c.comparePolicyVersions(privacyRule, privInfo, ok200(longPad + 'We may share your details with third parties for marketing.'), ok200(longPad + 'We do not sell or share your personal information.'));
+  assert.ok(r); assert.equal(r.status, 'check'); assert.ok(r.reason.includes('the built-in page has "do not sell or share"'));
+});
+t('comparePolicyVersions: script-embedded footer policy is not judged by length -> null', () => {
+  assert.equal(c.comparePolicyVersions(refundRule, { footerPath: '/pages/returns', standardPath: '/policies/refund-policy' },
+    Object.assign(ok200('Returns are accepted within 30 days of delivery. '.repeat(60)), { embed: 'Termly' }), ok200('Refunds within 14 days. '.repeat(5))), null);
+});
 t('comparePolicyVersions: refund page 3000 chars vs built-in stub 119 chars -> check about length', () => {
   const r = c.comparePolicyVersions(refundRule, { footerPath: '/pages/returns', standardPath: '/policies/refund-policy' },
     ok200('Returns are accepted within 30 days of delivery. '.repeat(60)), ok200('Refunds within 14 days. '.repeat(5)));
   assert.ok(r.reason.includes('/policies/refund-policy also exists (119 characters).'));
-  assert.ok(r); assert.equal(r.status, 'check'); assert.ok(r.reason.includes('The two versions differ a lot in length.'));
+  assert.ok(r); assert.equal(r.status, 'check'); assert.ok(r.reason.includes('The built-in page is much shorter than the footer page.'));
 });
 t('comparePolicyVersions: sharing words in refund policy do not trigger the privacy rule', () => {
   const a = 'We do not share refunds for sale items. '.repeat(20);

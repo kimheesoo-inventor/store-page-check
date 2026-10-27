@@ -428,7 +428,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   /* Two versions of one policy: the footer link goes to a custom page while Shopify's built-in /policies/ page also has text. */
   /* A built-in page this short is a stub (one or two sentences). Custom /pages/ text also counts menus, so longer built-in pages are not compared by length. */
   var VERSION_STUB_CHARS = 300;
-  var NEG_SHARE_RE = /\b(?:do not|don't|never)\s+(?:sell|share)\b/i;
+  var NEG_SHARE_RE = /\b(?:do(?:es)?\s+not|don['\u2019]t|doesn['\u2019]t|will\s+not|won['\u2019]t|would\s+not|cannot|can['\u2019]t|never)\s+(?:(?:sell|rent|trade),?\s+(?:or\s+|and\s+)?)*share\b/i;
   var POS_SHARE_RE = /\bwe\s+(?:may\s+)?share\b|\bshare\b[^.]{0,80}\bthird[- ]part(?:y|ies)\b/i;
   function normPolicyPath(p) { return String(p === undefined || p === null ? '' : p).toLowerCase().replace(/\/+$/, ''); }
   function cleanText(t) { return String(t === undefined || t === null ? '' : t).replace(/\s+/g, ' ').trim(); }
@@ -452,12 +452,12 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
       else if (bNeg && !bPos && aPos && !aNeg) detail = 'The footer page has ' + quoteHit(aPos) + ' and the built-in page has ' + quoteHit(bNeg) + '.';
     }
     /* Length is judged only when the built-in page is the stub: a short custom page is often filled in later by an app script. */
-    if (!detail && tb.length < ta.length * 0.25 && tb.length < VERSION_STUB_CHARS) detail = 'The two versions differ a lot in length.';
+    if (!detail && !footer.embed && !standard.embed && tb.length < ta.length * 0.25 && tb.length < VERSION_STUB_CHARS) detail = 'The built-in page is much shorter than the footer page.';
     if (!detail) return null;
     return item(GP, 'versions-' + rule.id, rule.label + ': two versions', 'check',
       'Your footer links to ' + info.footerPath + ' (' + ta.length + ' characters), and Shopify\'s built-in ' + rule.label.toLowerCase() +
       ' page ' + info.standardPath + ' also exists (' + tb.length + ' characters). ' + detail +
-      ' Customers and reviewers could see either. Consider making them match.', rule.ref);
+      ' Visitors may find either one, and they may say different things. Open both and consider making them match.', rule.ref);
   }
 
   var EMAIL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9\-]+(?:\.[A-Z0-9\-]+)*\.[A-Z]{2,}/gi;
