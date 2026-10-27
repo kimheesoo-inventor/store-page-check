@@ -364,7 +364,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
 
   /* ---- policy page contents ---- */
   var PLACEHOLDER_RES = [
-    /\[(?:LINK TO|INSERT|ENTER|YOUR|STORE|COMPANY|BUSINESS|EMAIL|PHONE|ADDRESS|NAME|DATE|NUMBER|URL)[A-Z0-9 _\-\/'&.,]*\]/g,
+    /\[(?:link to|insert|enter|your|store|company|business|email(?!\s+protected)|phone|address|name|date|number|url)\b[^\]\n]{0,80}\]/gi,
     /\[[A-Z][A-Z0-9 _\-\/'&.,]{3,60}\]/g
   ];
   var MIN_POLICY_CHARS = 40;
@@ -377,6 +377,21 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
       m.forEach(function (p) { if (found.indexOf(p) === -1) found.push(p); });
     });
     return { length: clean.length, placeholders: found.slice(0, 5) };
+  }
+
+  /* Known services that add policy text with a script or iframe, so the fetched HTML has none of it. html: raw page HTML. Returns the service name or ''. */
+  var POLICY_EMBEDS = [
+    { name: 'Termly', re: /name=["']termly-embed["']|app\.termly\.io|termly-jssdk/i },
+    { name: 'iubenda', re: /iubenda-embed|iubenda_policy|iubenda\.com\/(?:privacy-policy|terms-and-conditions|cookie-policy)/i },
+    { name: 'GetTerms', re: /getterms-embed|data-getterms|getterms\.io/i },
+    { name: 'Termageddon', re: /data-termageddon|termageddon-embed|termageddon\.com\//i },
+    { name: 'TermsFeed', re: /termsfeed-embed|data-termsfeed|termsfeed\.com\//i }
+  ];
+  var EMBED_SHORT_CHARS = 200;
+  function detectPolicyEmbed(html) {
+    var h = String(html === undefined || html === null ? '' : html);
+    for (var i = 0; i < POLICY_EMBEDS.length; i++) if (POLICY_EMBEDS[i].re.test(h)) return POLICY_EMBEDS[i].name;
+    return '';
   }
 
   var GP = 'Policy page contents';
@@ -397,8 +412,12 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
       return item(GP, id, label, 'check', 'The link goes to a page that returned HTTP ' + r.status + '.', rule.ref);
     }
     var a = analyzePolicyText(r.text);
+    /* A short page that carries a known policy embed: the text is added later by script, so it cannot be judged here. */
+    if (r.embed && a.length < EMBED_SHORT_CHARS) {
+      return item(GP, id, label, 'na', 'Policy text is loaded by a third-party embed (' + r.embed + '), which this check cannot read; open the page to confirm the text shows.', rule.ref);
+    }
     if (a.length < MIN_POLICY_CHARS) {
-      return item(GP, id, label, 'check', 'The page loads but shows little or no policy text (' + a.length + ' characters).', rule.ref);
+      return item(GP, id, label, 'check', 'The page loads, but its HTML has little or no policy text (' + a.length + ' characters). If the text is added by an embed or script (for example Termly), open the page to confirm visitors can see it.', rule.ref);
     }
     if (a.placeholders.length) {
       return item(GP, id, label, 'check', 'Template text still present, for example: ' + a.placeholders.slice(0, 3).join(', ') + '.', rule.ref);
@@ -505,7 +524,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
-    analyzePolicyText: analyzePolicyText, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets,
+    analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets,
     microdataToNodes: microdataToNodes, mergeProducts: mergeProducts, isProductItemtype: isProductItemtype
   };
 
@@ -633,7 +652,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
           return resp.text().then(function (html) {
             clearTimeout(timer);
             var text = policyPageText(new DOMParser().parseFromString(html, 'text/html'));
-            finish({ status: resp.status, finalSameOrigin: true, text: text });
+            finish({ status: resp.status, finalSameOrigin: true, text: text, embed: detectPolicyEmbed(html) });
           });
         }).catch(function () { clearTimeout(timer); finish({ failed: true }); });
       } catch (e) {

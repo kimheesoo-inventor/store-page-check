@@ -370,7 +370,7 @@ t('evaluatePolicyPage: HTTP 404 -> check with the status in the reason', () => {
 t('evaluatePolicyPage: heading-only page -> check, little or no text', () => {
   const r = c.evaluatePolicyPage(shipRule, { status: 200, finalSameOrigin: true, text: ' Shipping policy ' });
   assert.equal(r.status, 'check');
-  assert.equal(r.reason, 'The page loads but shows little or no policy text (15 characters).');
+  assert.equal(r.reason, 'The page loads, but its HTML has little or no policy text (15 characters). If the text is added by an embed or script (for example Termly), open the page to confirm visitors can see it.');
 });
 t('evaluatePolicyPage: length boundary 39 -> check, 40 -> ok', () => {
   assert.equal(c.evaluatePolicyPage(shipRule, { status: 200, finalSameOrigin: true, text: 'a'.repeat(39) }).status, 'check');
@@ -418,5 +418,44 @@ t('policyContentTargets: store link used; third-party and Shopify-hosted links g
   assert.equal(t4[3].standardPath, '/policies/terms-of-service');
 });
 
+t('detectPolicyEmbed: Termly embed div and script are detected', () => {
+  assert.equal(c.detectPolicyEmbed('<main><div name="termly-embed" data-id="x"></div><script src="https://app.termly.io/embed-policy.min.js"></script></main>'), 'Termly');
+  assert.equal(c.detectPolicyEmbed('<div class="iubenda-embed"></div>'), 'iubenda');
+  assert.equal(c.detectPolicyEmbed('<div data-getterms="1"></div>'), 'GetTerms');
+  assert.equal(c.detectPolicyEmbed('<div data-termageddon="1"></div>'), 'Termageddon');
+  assert.equal(c.detectPolicyEmbed('<div class="termsfeed-embed"></div>'), 'TermsFeed');
+});
+t('detectPolicyEmbed: the word Termly in a sentence is not an embed', () => {
+  assert.equal(c.detectPolicyEmbed('<p>We once looked at Termly and iubenda before writing this policy ourselves.</p>'), '');
+  assert.equal(c.detectPolicyEmbed(''), ''); assert.equal(c.detectPolicyEmbed(null), '');
+});
+t('evaluatePolicyPage: empty page with a Termly embed -> na naming Termly', () => {
+  const r = c.evaluatePolicyPage(refundRule, { status: 200, finalSameOrigin: true, text: 'Privacy Policy', embed: 'Termly' });
+  assert.equal(r.status, 'na');
+  assert.equal(r.reason, 'Policy text is loaded by a third-party embed (Termly), which this check cannot read; open the page to confirm the text shows.');
+});
+t('evaluatePolicyPage: long real text is judged normally even if an embed script is on the page', () => {
+  const r = c.evaluatePolicyPage(refundRule, { status: 200, finalSameOrigin: true, text: realPolicy.repeat(3), embed: 'Termly' });
+  assert.equal(r.status, 'ok');
+});
+t('evaluatePolicyPage: real text that mentions Termly in a sentence (no embed) is ok', () => {
+  const txt = realPolicy + ' Our cookie banner is provided by Termly.';
+  assert.equal(c.evaluatePolicyPage(refundRule, { status: 200, finalSameOrigin: true, text: txt, embed: c.detectPolicyEmbed('<p>' + txt + '</p>') }).status, 'ok');
+});
+t('evaluatePolicyPage: short page without an embed still says Check', () => {
+  assert.equal(c.evaluatePolicyPage(refundRule, { status: 200, finalSameOrigin: true, text: '', embed: '' }).status, 'check');
+});
+t('analyzePolicyText: [Your Contact Information] (mixed case) is found', () => {
+  assert.deepEqual(c.analyzePolicyText('Questions? Write to [Your Contact Information].').placeholders, ['[Your Contact Information]']);
+});
+t('analyzePolicyText: [insert return address] (lowercase) is found', () => {
+  assert.deepEqual(c.analyzePolicyText('Send returns to [insert return address] please.').placeholders, ['[insert return address]']);
+});
+t('analyzePolicyText: [email protected] (obfuscated address) and ordinary bracketed words are not flagged', () => {
+  assert.equal(c.analyzePolicyText('Write to [email protected] [optional] [see below] [1] [X] [Note] [names of items]').placeholders.length, 0);
+});
+t('analyzePolicyText: mixed-case duplicates of the same token collapse', () => {
+  assert.deepEqual(c.analyzePolicyText('[Store Name] and [Store Name]').placeholders, ['[Store Name]']);
+});
 console.log('\nTotal: ' + (pass + fail) + '  Passed: ' + pass + '  Failed: ' + fail);
 process.exit(fail ? 1 : 0);

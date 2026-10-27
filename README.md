@@ -35,6 +35,7 @@ node build.mjs
 ## Limits
 
 - It reads the page it runs on, and also loads the store's own policy pages (same site, read only, up to four requests) to check whether they are empty or still contain template text. Nothing is sent to the author or any third party. If a store's security settings block these requests, those items show N/A and you should open the pages yourself.
+- Policy text that an embed or script adds after the page opens (for example a Termly policy) is not seen. For known embed services (Termly, iubenda, GetTerms, Termageddon, TermsFeed) the item shows N/A; for other scripts a page can show Check even though visitors see the text. Template text is matched by common words such as `[Your ...]`, `[Insert ...]` or `[LINK TO ...]` in any letter case, so differently worded placeholders can be missed.
 - Structured data: JSON-LD and microdata are read. RDFa and microdata that points to elements elsewhere on the page (`itemref`) are not.
 - Sites with a strict Content Security Policy may block the panel.
 - Phone/email detection is pattern-based and can miss or misread.
