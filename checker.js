@@ -1,6 +1,7 @@
 /*
  * Store Page Check - free, open-source, single-page bookmarklet.
- * Reads only the page it runs on. No network requests, no tracking, nothing is sent anywhere.
+ * Reads the page it runs on and loads the store's own policy pages (same site, GET only) to see whether they are empty or still contain template text.
+ * No tracking; nothing is sent to the author or any third party.
  * Judgement functions (core) are kept separate from DOM code so they can be unit-tested in Node.
  * License: MIT, Copyright (c) 2026 Heesoo Kim
  */
@@ -14,7 +15,7 @@
 images: 'https://developers.google.com/search/docs/appearance/google-images'
   };
 
-  var NOTICE = 'Free, open-source check of this page only. Not affiliated with Google or Shopify. It does not guarantee Merchant Center approval or reinstatement. Nothing is sent anywhere.';
+  var NOTICE = 'Free, open-source check of this page and the store\'s own policy pages. Not affiliated with Google or Shopify. It does not guarantee Merchant Center approval or reinstatement. Nothing is sent to the author or anyone else.';
 
   var STATUS_LABEL = { ok: 'OK', check: 'Check', na: 'N/A' };
 
@@ -311,30 +312,98 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   /* Promotional banner wording such as "FREE SHIPPING on orders over $50" or "20% off". */
   var PROMO_TEXT = /\bfree\b|\$|%|\d|\borders? over\b|\boff\b|\bsale\b/i;
 
+  /* Returns { found: string|null, href: string } for one rule. href is '' for pop-up triggers. */
+  function findPolicyLink(rule, list, ownHost) {
+    for (var i = 0; i < list.length; i++) {
+      var href = String(list[i].href || '');
+      if (/^(mailto|tel|javascript):/i.test(href)) continue;
+      if (href && !isOwnLink(href, ownHost)) continue;
+      if (href && NON_POLICY_PATH.test(pathOf(href))) continue;
+      var text = String(list[i].text || '').trim();
+      if (PROMO_TEXT.test(text) && !(href && rule.path.test(pathOf(href)))) continue;
+      var controls = String(list[i].controls || '');
+      /* No href (pop-up trigger): count it only when it clearly names a policy, so a product "Shipping & Returns" accordion is not taken as a policy page. */
+      if (!href && !/polic|terms|privacy/i.test(controls + ' ' + text)) continue;
+      if ((href && rule.path.test(pathOf(href))) || (controls && rule.path.test(controls)) ||
+          (text.length > 0 && text.length <= 60 && rule.text.test(text))) {
+        return { found: href || ('"' + text + '" (opens on this page)'), href: href };
+      }
+    }
+    return { found: null, href: '' };
+  }
+
   function matchPolicyLinks(links, ownHost) {
     var list = asArray(links).filter(isObj);
     return POLICY_RULES.map(function (rule) {
-      var found = null;
-      for (var i = 0; i < list.length && !found; i++) {
-        var href = String(list[i].href || '');
-        if (/^(mailto|tel|javascript):/i.test(href)) continue;
-        if (href && !isOwnLink(href, ownHost)) continue;
-        if (href && NON_POLICY_PATH.test(pathOf(href))) continue;
-        var text = String(list[i].text || '').trim();
-        if (PROMO_TEXT.test(text) && !(href && rule.path.test(pathOf(href)))) continue;
-        var controls = String(list[i].controls || '');
-        /* No href (pop-up trigger): count it only when it clearly names a policy, so a product "Shipping & Returns" accordion is not taken as a policy page. */
-        if (!href && !/polic|terms|privacy/i.test(controls + ' ' + text)) continue;
-        if ((href && rule.path.test(pathOf(href))) || (controls && rule.path.test(controls)) ||
-            (text.length > 0 && text.length <= 60 && rule.text.test(text))) {
-          found = href || ('"' + text + '" (opens on this page)');
-        }
-      }
+      var found = findPolicyLink(rule, list, ownHost).found;
       return item('Policy links', 'policy-' + rule.id, rule.label,
         found ? 'ok' : 'check',
         found ? 'Link found: ' + found : 'No matching link found on this page. It may exist on other pages; add it to the footer or menu.',
         rule.ref);
     });
+  }
+
+  /* Policy pages whose contents are checked (same order as POLICY_RULES). hrefs: the store's own matched link, '' when none. */
+  var CONTENT_IDS = ['refund', 'shipping', 'privacy', 'terms'];
+  var STANDARD_POLICY_PATH = {
+    refund: '/policies/refund-policy', shipping: '/policies/shipping-policy',
+    privacy: '/policies/privacy-policy', terms: '/policies/terms-of-service'
+  };
+  function policyRuleById(id) {
+    for (var i = 0; i < POLICY_RULES.length; i++) if (POLICY_RULES[i].id === id) return POLICY_RULES[i];
+    return null;
+  }
+  /* Returns [{ rule, href }] for refund, shipping, privacy, terms. */
+  function policyContentTargets(links, ownHost) {
+    var list = asArray(links).filter(isObj);
+    return CONTENT_IDS.map(function (id) {
+      var rule = policyRuleById(id);
+      return { rule: rule, href: findPolicyLink(rule, list, ownHost).href, standardPath: STANDARD_POLICY_PATH[id] };
+    });
+  }
+
+  /* ---- policy page contents ---- */
+  var PLACEHOLDER_RES = [
+    /\[(?:LINK TO|INSERT|ENTER|YOUR|STORE|COMPANY|BUSINESS|EMAIL|PHONE|ADDRESS|NAME|DATE|NUMBER|URL)[A-Z0-9 _\-\/'&.,]*\]/g,
+    /\[[A-Z][A-Z0-9 _\-\/'&.,]{3,60}\]/g
+  ];
+  var MIN_POLICY_CHARS = 40;
+
+  function analyzePolicyText(text) {
+    var clean = String(text === undefined || text === null ? '' : text).replace(/\s+/g, ' ').trim();
+    var found = [];
+    PLACEHOLDER_RES.forEach(function (re) {
+      var m = clean.match(re) || [];
+      m.forEach(function (p) { if (found.indexOf(p) === -1) found.push(p); });
+    });
+    return { length: clean.length, placeholders: found.slice(0, 5) };
+  }
+
+  var GP = 'Policy page contents';
+  /* result: { status: HTTP status, finalSameOrigin: bool, text: string } or { skipped: 'reason' } or { failed: true }. */
+  function evaluatePolicyPage(rule, result) {
+    var label = rule.label;
+    var id = 'content-' + rule.id;
+    var r = isObj(result) ? result : {};
+    if (r.skipped) return item(GP, id, label, 'na', String(r.skipped), rule.ref);
+    if (r.failed || r.blocked || typeof r.status !== 'number' || r.status === 0) {
+      return item(GP, id, label, 'na',
+        'Could not load this page from the checker (it may be blocked by the store\'s security settings); open it yourself.', rule.ref);
+    }
+    if (r.finalSameOrigin === false) {
+      return item(GP, id, label, 'na', 'The link leads to another site, so the checker did not read it; open it yourself.', rule.ref);
+    }
+    if (r.status !== 200) {
+      return item(GP, id, label, 'check', 'The link goes to a page that returned HTTP ' + r.status + '.', rule.ref);
+    }
+    var a = analyzePolicyText(r.text);
+    if (a.length < MIN_POLICY_CHARS) {
+      return item(GP, id, label, 'check', 'The page loads but shows little or no policy text (' + a.length + ' characters).', rule.ref);
+    }
+    if (a.placeholders.length) {
+      return item(GP, id, label, 'check', 'Template text still present, for example: ' + a.placeholders.slice(0, 3).join(', ') + '.', rule.ref);
+    }
+    return item(GP, id, label, 'ok', 'Policy text found (' + a.length + ' characters), no template placeholders spotted.', rule.ref);
   }
 
   var EMAIL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9\-]+(?:\.[A-Z0-9\-]+)*\.[A-Z]{2,}/gi;
@@ -436,6 +505,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
+    analyzePolicyText: analyzePolicyText, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets,
     microdataToNodes: microdataToNodes, mergeProducts: mergeProducts, isProductItemtype: isProductItemtype
   };
 
@@ -532,6 +602,72 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return e;
   }
 
+  /* ---- policy page contents (DOM part): GET only, same origin, 6 s timeout ---- */
+  var FETCH_TIMEOUT_MS = 6000;
+
+  function policyPageText(doc) {
+    var root = doc.querySelector('.shopify-policy__body') || doc.querySelector('main') || doc.body;
+    if (!root) return '';
+    var copy = root.cloneNode(true);
+    Array.prototype.forEach.call(copy.querySelectorAll('script, style, noscript, nav, header, footer'), function (n) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+    });
+    return copy.textContent || '';
+  }
+
+  /* Resolves to a result for evaluatePolicyPage. Never rejects. */
+  function loadPolicyPage(url) {
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish(v) { if (!done) { done = true; resolve(v); } }
+      try {
+        var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctrl) ctrl.abort(); finish({ failed: true }); }, FETCH_TIMEOUT_MS);
+        var opts = { method: 'GET', credentials: 'same-origin', redirect: 'follow' };
+        if (ctrl) opts.signal = ctrl.signal;
+        fetch(url, opts).then(function (resp) {
+          var sameOrigin = false;
+          try { sameOrigin = new URL(resp.url || url, location.href).origin === location.origin; } catch (e) { sameOrigin = false; }
+          if (!sameOrigin) { clearTimeout(timer); finish({ status: resp.status, finalSameOrigin: false, text: '' }); return null; }
+          if (resp.status !== 200) { clearTimeout(timer); finish({ status: resp.status, finalSameOrigin: true, text: '' }); return null; }
+          return resp.text().then(function (html) {
+            clearTimeout(timer);
+            var text = policyPageText(new DOMParser().parseFromString(html, 'text/html'));
+            finish({ status: resp.status, finalSameOrigin: true, text: text });
+          });
+        }).catch(function () { clearTimeout(timer); finish({ failed: true }); });
+      } catch (e) {
+        finish({ failed: true });
+      }
+    });
+  }
+
+  /* Pick the URL to open for one policy: the store's own matched link (same origin only), else the standard Shopify path when window.Shopify exists. */
+  function policyUrlFor(target) {
+    if (target.href) {
+      try {
+        var u = new URL(target.href, location.href);
+        if ((u.protocol === 'http:' || u.protocol === 'https:') && u.origin === location.origin) return { url: u.href };
+        return { skip: 'The link on this page leads to another site, so the checker did not open it; open it yourself.' };
+      } catch (e) {
+        return { skip: 'The link on this page could not be read, so the checker did not open it.' };
+      }
+    }
+    if (window.Shopify) return { url: location.origin + target.standardPath };
+    return { skip: 'No link to this policy was found on this page, so there was nothing to open.' };
+  }
+
+  function loadPolicyResults(targets) {
+    return Promise.all(targets.map(function (t) {
+      var pick;
+      try { pick = policyUrlFor(t); } catch (e) { pick = { skip: 'Could not prepare this page for checking.' }; }
+      if (!pick.url) return Promise.resolve(evaluatePolicyPage(t.rule, { skipped: pick.skip }));
+      return loadPolicyPage(pick.url).then(function (r) {
+        try { return evaluatePolicyPage(t.rule, r); } catch (e) { return evaluatePolicyPage(t.rule, { failed: true }); }
+      }, function () { return evaluatePolicyPage(t.rule, { failed: true }); });
+    }));
+  }
+
   var COLORS = { ok: '#0a6b2d', check: '#8a4b00', na: '#555555' };
   var BG = { ok: '#e6f4ea', check: '#fff3e0', na: '#eeeeee' };
 
@@ -539,7 +675,8 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var old = document.getElementById(PANEL_ID);
     if (old) { old.parentNode.removeChild(old); return; }
 
-    var result = runChecks(readPage());
+    var pageData = readPage();
+    var result = runChecks(pageData);
     var host = el('div', { id: PANEL_ID, style: 'all:initial;position:fixed;right:8px;bottom:8px;z-index:2147483647;' });
     var root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
 
@@ -568,16 +705,23 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var sum = el('div', { class: 's', text: 'OK ' + s.ok + '  |  Check ' + s.check + '  |  N/A ' + s.na });
     var body = el('div', { class: 'b', role: 'region', 'aria-label': 'Check results' });
 
+    function makeRow(it) {
+      var badge = el('span', { class: 'k', style: 'background:' + BG[it.status] + ';color:' + COLORS[it.status], text: STATUS_LABEL[it.status] });
+      var docs = el('a', { href: it.ref, target: '_blank', rel: 'noopener noreferrer', text: 'Google docs' });
+      return el('div', { class: 'r' }, [
+        el('div', { class: 't' }, [badge, el('span', { class: 'n', text: it.label })]),
+        el('p', { class: 'm', style: 'margin:2px 0 0' }, [document.createTextNode(it.reason + ' '), docs])
+      ]);
+    }
     var lastGroup = null;
     result.items.forEach(function (it) {
       if (it.group !== lastGroup) { body.appendChild(el('div', { class: 'g', text: it.group })); lastGroup = it.group; }
-      var badge = el('span', { class: 'k', style: 'background:' + BG[it.status] + ';color:' + COLORS[it.status], text: STATUS_LABEL[it.status] });
-      var docs = el('a', { href: it.ref, target: '_blank', rel: 'noopener noreferrer', text: 'Google docs' });
-      body.appendChild(el('div', { class: 'r' }, [
-        el('div', { class: 't' }, [badge, el('span', { class: 'n', text: it.label })]),
-        el('p', { class: 'm', style: 'margin:2px 0 0' }, [document.createTextNode(it.reason + ' '), docs])
-      ]));
+      body.appendChild(makeRow(it));
     });
+    var policyHeader = el('div', { class: 'g', text: 'Policy page contents' });
+    var policyWait = el('p', { class: 'm', text: 'Checking policy pages...' });
+    body.appendChild(policyHeader);
+    body.appendChild(policyWait);
     body.appendChild(el('p', { class: 'm', text: 'Product structured data found: ' + formatsText(result.formats) + '. (These are notes to look at, not verdicts.)' }));
     if (result.jsonLdErrors) {
       body.appendChild(el('p', { class: 'm', text: result.jsonLdErrors + ' JSON-LD block(s) could not be parsed and were skipped.' }));
@@ -587,6 +731,30 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     root.appendChild(css);
     root.appendChild(el('div', { class: 'p', role: 'dialog', 'aria-label': 'Store Page Check results' }, [head, sum, body, foot]));
     document.body.appendChild(host);
+
+    /* Second step: open the store's own policy pages (GET, same site) and add their results. Any problem shows as N/A; the panel keeps working. */
+    var panelOpen = true;
+    closeBtn.addEventListener('click', function () { panelOpen = false; });
+    document.addEventListener('keydown', function esc(ev) {
+      if (ev.key === 'Escape') { panelOpen = false; document.removeEventListener('keydown', esc, true); }
+    }, true);
+    var targets = [];
+    try { targets = policyContentTargets(pageData.links, pageData.host); } catch (e) { targets = []; }
+    loadPolicyResults(targets).then(function (items) {
+      if (!panelOpen || !host.parentNode) return;
+      try {
+        var frag = document.createDocumentFragment();
+        items.forEach(function (it) { frag.appendChild(makeRow(it)); });
+        body.insertBefore(frag, policyWait);
+        body.removeChild(policyWait);
+        var s2 = summarize(result.items.concat(items));
+        sum.textContent = 'OK ' + s2.ok + '  |  Check ' + s2.check + '  |  N/A ' + s2.na;
+      } catch (e) {
+        policyWait.textContent = 'Policy pages could not be checked (N/A).';
+      }
+    }, function () {
+      if (policyWait.parentNode) policyWait.textContent = 'Policy pages could not be checked (N/A).';
+    });
   }
 
   render();

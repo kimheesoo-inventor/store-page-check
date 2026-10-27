@@ -320,7 +320,102 @@ t('every item has a status of ok/check/na, a reason, and a Google docs link', ()
   }
 });
 t('notice text is the required fixed sentence', () => {
-  assert.equal(c.NOTICE, 'Free, open-source check of this page only. Not affiliated with Google or Shopify. It does not guarantee Merchant Center approval or reinstatement. Nothing is sent anywhere.');
+  assert.equal(c.NOTICE, 'Free, open-source check of this page and the store\'s own policy pages. Not affiliated with Google or Shopify. It does not guarantee Merchant Center approval or reinstatement. Nothing is sent to the author or anyone else.');
+});
+
+/* ---- policy page contents ---- */
+const shipRule = { id: 'shipping', label: 'Shipping policy', ref: c.DOCS.misrep };
+const refundRule = { id: 'refund', label: 'Refund / return policy', ref: c.DOCS.editorial };
+const realPolicy = 'We ship within 2 business days. Orders arrive in 5 to 7 days. Returns are accepted for 30 days after delivery.';
+t('analyzePolicyText: empty body -> length 0, no placeholders', () => {
+  assert.deepEqual(c.analyzePolicyText(''), { length: 0, placeholders: [] });
+  assert.deepEqual(c.analyzePolicyText(null), { length: 0, placeholders: [] });
+  assert.equal(c.analyzePolicyText('   \n\t  ').length, 0);
+});
+t('analyzePolicyText: whitespace is collapsed and trimmed', () => {
+  assert.equal(c.analyzePolicyText('  a   b \n\n c  ').length, 5);
+});
+t('analyzePolicyText: real text has no placeholders', () => {
+  const r = c.analyzePolicyText(realPolicy);
+  assert.equal(r.placeholders.length, 0); assert.ok(r.length > 40);
+});
+t('analyzePolicyText: [LINK TO REFUND POLICY] is found', () => {
+  const r = c.analyzePolicyText('See our refund terms at [LINK TO REFUND POLICY] for details.');
+  assert.deepEqual(r.placeholders, ['[LINK TO REFUND POLICY]']);
+});
+t('analyzePolicyText: [LINK TO PRIVACY POLICY], [INSERT ...] and [STORE NAME] are found', () => {
+  const r = c.analyzePolicyText('[STORE NAME] respects privacy. [INSERT EMAIL HERE] or [LINK TO PRIVACY POLICY].');
+  assert.deepEqual(r.placeholders.slice().sort(), ['[INSERT EMAIL HERE]', '[LINK TO PRIVACY POLICY]', '[STORE NAME]']);
+});
+t('analyzePolicyText: lowercase brackets such as [optional] are not flagged', () => {
+  assert.equal(c.analyzePolicyText('Pay by card [optional] or [see below] or [Note].').placeholders.length, 0);
+});
+t('analyzePolicyText: [1], [X] and [a] are not flagged', () => {
+  assert.equal(c.analyzePolicyText('Footnote [1] and [X] and [12] and [A].').placeholders.length, 0);
+});
+t('analyzePolicyText: generic all-caps rule catches [RETURN WINDOW IN DAYS]', () => {
+  assert.deepEqual(c.analyzePolicyText('Returns within [RETURN WINDOW IN DAYS] days.').placeholders, ['[RETURN WINDOW IN DAYS]']);
+});
+t('analyzePolicyText: duplicates are removed and the list is capped at 5', () => {
+  const dup = c.analyzePolicyText('[STORE NAME] [STORE NAME] [STORE NAME]');
+  assert.deepEqual(dup.placeholders, ['[STORE NAME]']);
+  const many = c.analyzePolicyText('[INSERT A] [INSERT B] [INSERT C] [INSERT D] [INSERT E] [INSERT F] [INSERT G]');
+  assert.equal(many.placeholders.length, 5);
+});
+t('evaluatePolicyPage: HTTP 404 -> check with the status in the reason', () => {
+  const r = c.evaluatePolicyPage(shipRule, { status: 404, finalSameOrigin: true, text: '' });
+  assert.equal(r.status, 'check'); assert.equal(r.reason, 'The link goes to a page that returned HTTP 404.');
+  assert.equal(r.group, 'Policy page contents'); assert.equal(r.id, 'content-shipping');
+});
+t('evaluatePolicyPage: heading-only page -> check, little or no text', () => {
+  const r = c.evaluatePolicyPage(shipRule, { status: 200, finalSameOrigin: true, text: ' Shipping policy ' });
+  assert.equal(r.status, 'check');
+  assert.equal(r.reason, 'The page loads but shows little or no policy text (15 characters).');
+});
+t('evaluatePolicyPage: length boundary 39 -> check, 40 -> ok', () => {
+  assert.equal(c.evaluatePolicyPage(shipRule, { status: 200, finalSameOrigin: true, text: 'a'.repeat(39) }).status, 'check');
+  assert.equal(c.evaluatePolicyPage(shipRule, { status: 200, finalSameOrigin: true, text: 'a'.repeat(40) }).status, 'ok');
+});
+t('evaluatePolicyPage: placeholder text -> check naming the placeholder', () => {
+  const r = c.evaluatePolicyPage(refundRule, { status: 200, finalSameOrigin: true, text: realPolicy + ' [LINK TO REFUND POLICY]' });
+  assert.equal(r.status, 'check');
+  assert.equal(r.reason, 'Template text still present, for example: [LINK TO REFUND POLICY].');
+});
+t('evaluatePolicyPage: real text -> ok with character count', () => {
+  const r = c.evaluatePolicyPage(refundRule, { status: 200, finalSameOrigin: true, text: realPolicy });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.reason, 'Policy text found (' + realPolicy.length + ' characters), no template placeholders spotted.');
+});
+t('evaluatePolicyPage: blocked or failed fetch -> na', () => {
+  for (const res of [{ failed: true }, { blocked: true }, {}, undefined, { status: 0 }]) {
+    const r = c.evaluatePolicyPage(shipRule, res);
+    assert.equal(r.status, 'na');
+    assert.ok(/Could not load this page from the checker/.test(r.reason));
+  }
+});
+t('evaluatePolicyPage: redirect to another site -> na, text is not judged', () => {
+  const r = c.evaluatePolicyPage(shipRule, { status: 200, finalSameOrigin: false, text: '' });
+  assert.equal(r.status, 'na');
+});
+t('evaluatePolicyPage: other non-200 status -> check', () => {
+  assert.equal(c.evaluatePolicyPage(shipRule, { status: 500, finalSameOrigin: true, text: '' }).reason, 'The link goes to a page that returned HTTP 500.');
+});
+t('evaluatePolicyPage: skipped target -> na with the given reason; items use known refs', () => {
+  const r = c.evaluatePolicyPage(shipRule, { skipped: 'Nothing to open.' });
+  assert.equal(r.status, 'na'); assert.equal(r.reason, 'Nothing to open.');
+  assert.ok(Object.values(c.DOCS).includes(r.ref));
+});
+t('policyContentTargets: store link used; third-party and Shopify-hosted links give no href', () => {
+  const links = [
+    { href: '/policies/refund-policy', text: 'Refund policy' },
+    { href: 'https://hcaptcha.com/privacy', text: 'Privacy' },
+    { href: 'https://www.shopify.com/legal/terms', text: 'Terms of Service' }
+  ];
+  const t4 = c.policyContentTargets(links, 'shop.example.com');
+  assert.deepEqual(t4.map((x) => x.rule.id), ['refund', 'shipping', 'privacy', 'terms']);
+  assert.equal(t4[0].href, '/policies/refund-policy');
+  assert.equal(t4[1].href, ''); assert.equal(t4[2].href, '');
+  assert.equal(t4[3].standardPath, '/policies/terms-of-service');
 });
 
 console.log('\nTotal: ' + (pass + fail) + '  Passed: ' + pass + '  Failed: ' + fail);

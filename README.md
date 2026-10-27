@@ -1,12 +1,13 @@
 # Store Page Check
 
-A free, open-source bookmarklet that reads the store page you are on and lists what to look at before a Google Merchant Center review. It checks only the current page. It makes no network requests and sends nothing anywhere.
+A free, open-source bookmarklet that reads the store page you are on and lists what to look at before a Google Merchant Center review. It reads the page it runs on and the store's own policy pages (see Limits). It sends nothing to the author or anyone else.
 
 Not affiliated with Google or Shopify. It does not guarantee Merchant Center approval or reinstatement.
 
 ## What it checks
 
 - Policy links: refund/return, shipping, privacy, terms, contact (Shopify default paths recognized)
+- Policy page contents: whether the refund, shipping, privacy and terms pages are empty (heading only), return an error, or still contain template text such as `[LINK TO REFUND POLICY]`
 - Contact details: email and phone visible on the page (address is left for you to check)
 - Product data, read from JSON-LD and/or microdata (`itemtype` schema.org/Product): name, image, price, currency, availability, brand, identifier, shippingDetails, hasMerchantReturnPolicy. The panel says which format(s) were found; if both exist, JSON-LD values are used and gaps are filled from microdata.
 - Product price vs `og:price:amount`
@@ -33,7 +34,7 @@ node build.mjs
 
 ## Limits
 
-- Reads only the page it runs on; policy pages are not opened.
+- It reads the page it runs on, and also loads the store's own policy pages (same site, read only, up to four requests) to check whether they are empty or still contain template text. Nothing is sent to the author or any third party. If a store's security settings block these requests, those items show N/A and you should open the pages yourself.
 - Structured data: JSON-LD and microdata are read. RDFa and microdata that points to elements elsewhere on the page (`itemref`) are not.
 - Sites with a strict Content Security Policy may block the panel.
 - Phone/email detection is pattern-based and can miss or misread.
