@@ -125,7 +125,7 @@
 </ul>
 
 <h2 id="privacy">Privacy</h2>
-<p>The checker runs inside your browser on the page you click it on. The checker itself has no analytics or tracking. Besides reading that page, it loads the store's own policy pages (refund, shipping, privacy, terms) from the same site with ordinary read-only requests, and it sends nothing to the author or anyone else. (Scripts the store page already runs, such as its own analytics, keep running as usual.) This page uses no external scripts, fonts or styles. The code is a single readable file, <a href="checker.js">checker.js</a>.</p>
+<p>The checker runs inside your browser on the page you click it on. The checker itself has no analytics or tracking. Besides reading that page, it loads the store's own policy pages (refund, shipping, privacy, terms) from the same site with ordinary read-only requests, and it sends nothing to the author or anyone else. (Scripts the store page already runs, such as its own analytics, keep running as usual.) This page uses no external fonts or styles. Its only external script is Cloudflare Web Analytics, which, per Cloudflare, counts visits to this page without cookies or tracking of individual visitors; Cloudflare receives visitors' IP addresses but says it does not store them in core databases or logs. The checker itself does not load it. The code is a single readable file, <a href="checker.js">checker.js</a>.</p>
 <p>The optional feedback form is a Google Form, so answers are stored in my Google account. Your email is asked for only if you agree to be contacted. I use it only to reply about this checker, never share or sell it, and delete it when you ask; I delete all form answers by 2027-04-30 at the latest. This page is hosted on GitHub Pages, and GitHub may keep standard visit logs such as IP addresses.</p>
 
 <h2 id="about">About</h2>
@@ -137,5 +137,6 @@
 </footer>
 
 </main>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "4369363e9e4d4454afa4218085daeb0b"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>
