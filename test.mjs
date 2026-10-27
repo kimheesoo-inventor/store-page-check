@@ -457,5 +457,64 @@ t('analyzePolicyText: [email protected] (obfuscated address) and ordinary bracke
 t('analyzePolicyText: mixed-case duplicates of the same token collapse', () => {
   assert.deepEqual(c.analyzePolicyText('[Store Name] and [Store Name]').placeholders, ['[Store Name]']);
 });
+/* ---- two versions of one policy (L040) ---- */
+const privacyRule = { id: 'privacy', label: 'Privacy policy', ref: c.DOCS.editorial };
+const ok200 = (text) => ({ status: 200, finalSameOrigin: true, text, embed: '' });
+const loopFooter = 'Privacy Policy. ' + 'We collect your name, address and order details to fulfil orders. '.repeat(40) +
+  'We share your Personal Information with third parties to help us use your Personal Information, as described above.';
+const loopStd = 'Privacy policy. We respect your privacy and do not share your information with anyone.';
+const privInfo = { footerPath: '/pages/privacy', standardPath: '/policies/privacy-policy' };
+t('comparePolicyVersions: Loop-type pair (long footer page that shares, one-line built-in that does not) -> check', () => {
+  const r = c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), ok200(loopStd));
+  assert.ok(r); assert.equal(r.status, 'check'); assert.equal(r.id, 'versions-privacy');
+  assert.ok(r.reason.startsWith('Your footer links to /pages/privacy ('));
+  assert.ok(r.reason.includes("Shopify's built-in privacy policy page /policies/privacy-policy also exists (" + loopStd.length + ' characters).'));
+  assert.ok(r.reason.includes('the built-in page has "do not share"'));
+  assert.ok(r.reason.endsWith('Customers and reviewers could see either. Consider making them match.'));
+});
+t('comparePolicyVersions: same text in both places -> null', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), ok200('  ' + loopFooter + ' ')), null);
+});
+t('comparePolicyVersions: built-in page 404 or empty -> null', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), { status: 404, finalSameOrigin: true, text: '' }), null);
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), ok200('')), null);
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), { failed: true }), null);
+});
+t('comparePolicyVersions: footer already points to the built-in path (or redirects there) -> null', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, { footerPath: '/policies/privacy-policy/', standardPath: '/policies/privacy-policy' }, ok200(loopFooter), ok200(loopStd)), null);
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), Object.assign(ok200(loopStd), { finalPath: '/pages/privacy' })), null);
+});
+t('comparePolicyVersions: similar length, different wording, no sharing words -> null', () => {
+  const a = 'We use your details to ship orders and answer questions. '.repeat(20);
+  const b = 'Your details are used for shipping and for replying to messages. '.repeat(18);
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(a), ok200(b)), null);
+});
+t('comparePolicyVersions: both versions say "do not sell" and "may share" -> no sharing note, null at similar length', () => {
+  const a = 'We do not sell your data. We may share it with our shipping partner. '.repeat(15);
+  const b = 'We do not sell personal information. We may share it with payment processors. '.repeat(14);
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(a), ok200(b)), null);
+});
+t('comparePolicyVersions: refund page 3000 chars vs built-in stub 119 chars -> check about length', () => {
+  const r = c.comparePolicyVersions(refundRule, { footerPath: '/pages/returns', standardPath: '/policies/refund-policy' },
+    ok200('Returns are accepted within 30 days of delivery. '.repeat(60)), ok200('Refunds within 14 days. '.repeat(5)));
+  assert.ok(r.reason.includes('/policies/refund-policy also exists (119 characters).'));
+  assert.ok(r); assert.equal(r.status, 'check'); assert.ok(r.reason.includes('The two versions differ a lot in length.'));
+});
+t('comparePolicyVersions: sharing words in refund policy do not trigger the privacy rule', () => {
+  const a = 'We do not share refunds for sale items. '.repeat(20);
+  const b = 'We share the cost with third party carriers for returns. '.repeat(16);
+  assert.equal(c.comparePolicyVersions(refundRule, { footerPath: '/pages/returns', standardPath: '/policies/refund-policy' }, ok200(a), ok200(b)), null);
+});
+t('comparePolicyVersions: short built-in page carrying an embed -> null', () => {
+  assert.equal(c.comparePolicyVersions(privacyRule, privInfo, ok200(loopFooter), Object.assign(ok200(loopStd), { embed: 'Termly' })), null);
+});
+t('comparePolicyVersions: short custom page (50 chars, app-filled) vs 1163-char built-in (Allbirds case) -> null', () => {
+  assert.equal(c.comparePolicyVersions(refundRule, { footerPath: '/pages/returns-exchanges', standardPath: '/policies/refund-policy' },
+    ok200('Returns & Exchanges. Start your return online here.'), ok200('You have 30 days after receiving your item to request a return. '.repeat(18))), null);
+});
+t('comparePolicyVersions: long custom page vs 391-char built-in refund text (Loop refund case) -> null', () => {
+  const std = 'Yarn may be returned for store credit within 120 days of purchase if unused. '.repeat(6).slice(0, 391);
+  assert.equal(c.comparePolicyVersions(refundRule, { footerPath: '/pages/policies', standardPath: '/policies/refund-policy' }, ok200('Store Policies. Unused yarn may be returned within 120 days. '.repeat(65)), ok200(std)), null);
+});
 console.log('\nTotal: ' + (pass + fail) + '  Passed: ' + pass + '  Failed: ' + fail);
 process.exit(fail ? 1 : 0);

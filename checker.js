@@ -425,6 +425,41 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return item(GP, id, label, 'ok', 'Policy text found (' + a.length + ' characters), no template placeholders spotted.', rule.ref);
   }
 
+  /* Two versions of one policy: the footer link goes to a custom page while Shopify's built-in /policies/ page also has text. */
+  /* A built-in page this short is a stub (one or two sentences). Custom /pages/ text also counts menus, so longer built-in pages are not compared by length. */
+  var VERSION_STUB_CHARS = 300;
+  var NEG_SHARE_RE = /\b(?:do not|don't|never)\s+(?:sell|share)\b/i;
+  var POS_SHARE_RE = /\bwe\s+(?:may\s+)?share\b|\bshare\b[^.]{0,80}\bthird[- ]part(?:y|ies)\b/i;
+  function normPolicyPath(p) { return String(p === undefined || p === null ? '' : p).toLowerCase().replace(/\/+$/, ''); }
+  function cleanText(t) { return String(t === undefined || t === null ? '' : t).replace(/\s+/g, ' ').trim(); }
+  function quoteHit(m) { var s = cleanText(m && m[0]); return '"' + (s.length > 80 ? s.slice(0, 77) + '...' : s) + '"'; }
+  /* info: { footerPath, standardPath }. footer, standard: results in the evaluatePolicyPage shape (standard may carry finalPath). Returns an item or null. */
+  function comparePolicyVersions(rule, info, footer, standard) {
+    if (!rule || !isObj(info) || !isObj(footer) || !isObj(standard)) return null;
+    var fp = normPolicyPath(info.footerPath), sp = normPolicyPath(info.standardPath);
+    if (!fp || !sp || fp === sp) return null;
+    if (standard.finalPath && normPolicyPath(standard.finalPath) === fp) return null;
+    function usable(r) { return r.status === 200 && r.finalSameOrigin === true && !r.failed && !r.skipped; }
+    if (!usable(footer) || !usable(standard)) return null;
+    var ta = cleanText(footer.text), tb = cleanText(standard.text);
+    if (ta.length < MIN_POLICY_CHARS || tb.length < MIN_POLICY_CHARS) return null;
+    if ((footer.embed && ta.length < EMBED_SHORT_CHARS) || (standard.embed && tb.length < EMBED_SHORT_CHARS)) return null;
+    if (ta === tb) return null;
+    var detail = '';
+    if (rule.id === 'privacy') {
+      var aNeg = ta.match(NEG_SHARE_RE), aPos = ta.match(POS_SHARE_RE), bNeg = tb.match(NEG_SHARE_RE), bPos = tb.match(POS_SHARE_RE);
+      if (aNeg && !aPos && bPos && !bNeg) detail = 'The footer page has ' + quoteHit(aNeg) + ' and the built-in page has ' + quoteHit(bPos) + '.';
+      else if (bNeg && !bPos && aPos && !aNeg) detail = 'The footer page has ' + quoteHit(aPos) + ' and the built-in page has ' + quoteHit(bNeg) + '.';
+    }
+    /* Length is judged only when the built-in page is the stub: a short custom page is often filled in later by an app script. */
+    if (!detail && tb.length < ta.length * 0.25 && tb.length < VERSION_STUB_CHARS) detail = 'The two versions differ a lot in length.';
+    if (!detail) return null;
+    return item(GP, 'versions-' + rule.id, rule.label + ': two versions', 'check',
+      'Your footer links to ' + info.footerPath + ' (' + ta.length + ' characters), and Shopify\'s built-in ' + rule.label.toLowerCase() +
+      ' page ' + info.standardPath + ' also exists (' + tb.length + ' characters). ' + detail +
+      ' Customers and reviewers could see either. Consider making them match.', rule.ref);
+  }
+
   var EMAIL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9\-]+(?:\.[A-Z0-9\-]+)*\.[A-Z]{2,}/gi;
   var PHONE_RES = [
     /(?:\+?1[\s.\-]?)?\(?\b\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}\b/,
@@ -524,7 +559,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
-    analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets,
+    analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,
     microdataToNodes: microdataToNodes, mergeProducts: mergeProducts, isProductItemtype: isProductItemtype
   };
 
@@ -652,7 +687,9 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
           return resp.text().then(function (html) {
             clearTimeout(timer);
             var text = policyPageText(new DOMParser().parseFromString(html, 'text/html'));
-            finish({ status: resp.status, finalSameOrigin: true, text: text, embed: detectPolicyEmbed(html) });
+            var finalPath = '';
+            try { finalPath = new URL(resp.url || url, location.href).pathname; } catch (e) { finalPath = ''; }
+            finish({ status: resp.status, finalSameOrigin: true, text: text, embed: detectPolicyEmbed(html), finalPath: finalPath });
           });
         }).catch(function () { clearTimeout(timer); finish({ failed: true }); });
       } catch (e) {
@@ -676,15 +713,29 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return { skip: 'No link to this policy was found on this page, so there was nothing to open.' };
   }
 
+  /* When the footer link is a different same-site page, also read Shopify's built-in policy page and compare. Resolves to an item or null. */
+  function loadVersionCompare(t, url, footerResult) {
+    try {
+      if (!window.Shopify || !t.standardPath) return Promise.resolve(null);
+      var footerPath = new URL(url, location.href).pathname;
+      if (normPolicyPath(footerPath) === normPolicyPath(t.standardPath)) return Promise.resolve(null);
+      return loadPolicyPage(location.origin + t.standardPath).then(function (std) {
+        try { return comparePolicyVersions(t.rule, { footerPath: footerPath, standardPath: t.standardPath }, footerResult, std); } catch (e) { return null; }
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+
   function loadPolicyResults(targets) {
     return Promise.all(targets.map(function (t) {
       var pick;
       try { pick = policyUrlFor(t); } catch (e) { pick = { skip: 'Could not prepare this page for checking.' }; }
-      if (!pick.url) return Promise.resolve(evaluatePolicyPage(t.rule, { skipped: pick.skip }));
+      if (!pick.url) return Promise.resolve([evaluatePolicyPage(t.rule, { skipped: pick.skip })]);
       return loadPolicyPage(pick.url).then(function (r) {
-        try { return evaluatePolicyPage(t.rule, r); } catch (e) { return evaluatePolicyPage(t.rule, { failed: true }); }
-      }, function () { return evaluatePolicyPage(t.rule, { failed: true }); });
-    }));
+        var main;
+        try { main = evaluatePolicyPage(t.rule, r); } catch (e) { return [evaluatePolicyPage(t.rule, { failed: true })]; }
+        return loadVersionCompare(t, pick.url, r).then(function (extra) { return extra ? [main, extra] : [main]; }, function () { return [main]; });
+      }, function () { return [evaluatePolicyPage(t.rule, { failed: true })]; });
+    })).then(function (lists) { return [].concat.apply([], lists); });
   }
 
   var COLORS = { ok: '#0a6b2d', check: '#8a4b00', na: '#555555' };
