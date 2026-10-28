@@ -661,6 +661,42 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return out;
   }
 
+  /* Shopify's built-in contact information page (/policies/contact-information), read in the second step.
+     result: {status, finalSameOrigin, text, failed, skipped}. Returns an item, or null when the page is missing,
+     unreadable, or lists no address or number (nothing to say). */
+  var CONTACT_INFO_PATH = '/policies/contact-information';
+  function evaluateContactInfoPage(result) {
+    var r = result || {};
+    if (r.failed || r.skipped || r.status !== 200 || r.finalSameOrigin !== true) return null;
+    var text = String(r.text || '');
+    if (cleanText(text) === '') return null;
+    var G = 'Policy page contents';
+    var where = 'Your contact information page (' + CONTACT_INFO_PATH + ')';
+    var typo = findTypoEmails(text, []);
+    var sample = findSampleEmails(text, []);
+    var samplePh = findSamplePhones(text, []);
+    var notes = [];
+    if (typo.length) {
+      var ending = typo[0].split('.').pop();
+      notes.push('shows "' + typo[0] + '", which ends in ".' + ending + '", probably a typo for ".' + TYPO_TLD[ending.toLowerCase()] + '", so messages sent to it will not reach you' +
+        (typo.length > 1 ? ' (' + (typo.length - 1) + ' more like this)' : ''));
+    }
+    if (sample.length) {
+      notes.push('shows "' + sample[0] + '", which looks like a sample address left from a template rather than your own, so messages sent to it will likely not reach you');
+    }
+    if (samplePh.length) {
+      notes.push('shows "' + samplePh[0] + '", which looks like a sample number left from a template rather than your own');
+    }
+    if (notes.length) {
+      return item(G, 'contact-info-page', 'Contact information page', 'check', where + ' ' + notes.join('; it also ') + '.', DOCS.editorial);
+    }
+    var emails = findEmails(text, []);
+    var phones = findPhones(text, []);
+    if (!emails.length && !phones.length) return null;
+    return item(G, 'contact-info-page', 'Contact information page', 'ok',
+      where + ' lists ' + (emails.length ? emails[0] : phones[0]) + '. Nothing that looks like a typo or sample value was found there.', DOCS.editorial);
+  }
+
   /* imgs: [{alt: string|null, role, ariaHidden}] */
   function evaluateAlt(imgs) {
     var G = 'Images';
@@ -714,7 +750,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto, findSampleEmails: findSampleEmails, findSamplePhones: findSamplePhones,
     findTypoEmails: findTypoEmails, findShopifySocialLinks: findShopifySocialLinks,
-    findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
+    findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateContactInfoPage: evaluateContactInfoPage, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
     analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,
     microdataToNodes: microdataToNodes, mergeProducts: mergeProducts, isProductItemtype: isProductItemtype
@@ -895,6 +931,27 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     })).then(function (lists) { return [].concat.apply([], lists); });
   }
 
+  /* Contact information page: the store's own same-site link to it, else Shopify's standard path on a Shopify store.
+     Skipped when this page is already that page (the contact checks above already read it). Resolves to an item or null. */
+  function loadContactInfoItem(links) {
+    try {
+      if (normPolicyPath(location.pathname) === CONTACT_INFO_PATH) return Promise.resolve(null);
+      var url = null;
+      asArray(links).forEach(function (l) {
+        if (url || !l || !l.href) return;
+        try {
+          var u = new URL(l.href, location.href);
+          if (u.origin === location.origin && normPolicyPath(u.pathname) === CONTACT_INFO_PATH) url = u.href;
+        } catch (e) { /* ignore */ }
+      });
+      if (!url && window.Shopify) url = location.origin + CONTACT_INFO_PATH;
+      if (!url) return Promise.resolve(null);
+      return loadPolicyPage(url).then(function (r) {
+        try { return evaluateContactInfoPage(r); } catch (e) { return null; }
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+
   var COLORS = { ok: '#0a6b2d', check: '#8a4b00', na: '#555555' };
   var BG = { ok: '#e6f4ea', check: '#fff3e0', na: '#eeeeee' };
 
@@ -968,6 +1025,8 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var targets = [];
     try { targets = policyContentTargets(pageData.links, pageData.host); } catch (e) { targets = []; }
     loadPolicyResults(targets).then(function (items) {
+      return loadContactInfoItem(pageData.links).then(function (ci) { return ci ? items.concat([ci]) : items; }, function () { return items; });
+    }).then(function (items) {
       if (!panelOpen || !host.parentNode) return;
       try {
         var frag = document.createDocumentFragment();

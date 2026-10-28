@@ -721,5 +721,40 @@ t('comparePolicyVersions: long custom page vs 391-char built-in refund text (Loo
   const std = 'Yarn may be returned for store credit within 120 days of purchase if unused. '.repeat(6).slice(0, 391);
   assert.equal(c.comparePolicyVersions(refundRule, { footerPath: '/pages/policies', standardPath: '/policies/refund-policy' }, ok200('Store Policies. Unused yarn may be returned within 120 days. '.repeat(65)), ok200(std)), null);
 });
+/* ---- contact information page (/policies/contact-information), read in the second step ---- */
+const ci200 = (text) => ({ status: 200, finalSameOrigin: true, text });
+t('evaluateContactInfoPage: .ccom typo on the page (FORTE case) -> check naming the address and .com', () => {
+  const r = c.evaluateContactInfoPage(ci200('Trade name: FORTE Candle Co. Phone number: 727-555-2841 Email: erin@fortecandles.ccom Physical address: St. Petersburg FL'));
+  assert.equal(r.status, 'check'); assert.equal(r.id, 'contact-info-page');
+  assert.ok(r.reason.includes('erin@fortecandles.ccom')); assert.ok(r.reason.includes('".com"'));
+});
+t('evaluateContactInfoPage: sample address example.com -> check', () => {
+  const r = c.evaluateContactInfoPage(ci200('Email: support@example.com'));
+  assert.equal(r.status, 'check'); assert.ok(r.reason.includes('support@example.com'));
+});
+t('evaluateContactInfoPage: sample phone 123-456-7890 -> check', () => {
+  const r = c.evaluateContactInfoPage(ci200('Phone: +1 (123) 456-7890 Email: owner@realshop.com'));
+  assert.equal(r.status, 'check'); assert.ok(r.reason.includes('456-7890'));
+});
+t('evaluateContactInfoPage: typo and sample phone together -> one check row naming both', () => {
+  const r = c.evaluateContactInfoPage(ci200('Phone: (123) 456-7890 Email: hi@shop.con'));
+  assert.equal(r.status, 'check'); assert.ok(r.reason.includes('hi@shop.con')); assert.ok(r.reason.includes('it also'));
+});
+t('evaluateContactInfoPage: clean address -> ok naming it', () => {
+  const r = c.evaluateContactInfoPage(ci200('Trade name: Maple Shop. Email: marcy@mapleshoplakeplacid.com Phone: 518-354-0445'));
+  assert.equal(r.status, 'ok'); assert.ok(r.reason.includes('marcy@mapleshoplakeplacid.com'));
+});
+t('evaluateContactInfoPage: page with no email or phone -> null (nothing to say)', () => {
+  assert.equal(c.evaluateContactInfoPage(ci200('Trade name: Shop. Physical address: 1 Main St')), null);
+});
+t('evaluateContactInfoPage: 404, failed, skipped, other site, empty -> null', () => {
+  assert.equal(c.evaluateContactInfoPage({ status: 404, finalSameOrigin: true, text: '' }), null);
+  assert.equal(c.evaluateContactInfoPage({ failed: true }), null);
+  assert.equal(c.evaluateContactInfoPage({ skipped: 'x' }), null);
+  assert.equal(c.evaluateContactInfoPage({ status: 200, finalSameOrigin: false, text: 'a@b.ccom' }), null);
+  assert.equal(c.evaluateContactInfoPage(ci200('   ')), null);
+  assert.equal(c.evaluateContactInfoPage(undefined), null);
+});
+
 console.log('\nTotal: ' + (pass + fail) + '  Passed: ' + pass + '  Failed: ' + fail);
 process.exit(fail ? 1 : 0);
