@@ -500,14 +500,29 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return 'the part after @ is not a complete domain such as example.com';
   }
 
-  function findEmails(text, hrefs) {
+  /* Sample addresses that templates ship with (support@example.com, contact@yourstore.com). Exact domains or their subdomains only. */
+  var SAMPLE_EMAIL_DOMAIN = /(^|\.)(example\.(com|org|net)|your(store|domain|site|website|shop|company|business|brand)\.com)$/i;
+  function isSampleEmail(a) {
+    return SAMPLE_EMAIL_DOMAIN.test(String(a || '').split('@').pop());
+  }
+
+  function allEmails(text, hrefs) {
     var found = [];
     asArray(hrefs).forEach(function (h) {
       (mailtoAddresses(h) || []).forEach(function (a) { if (isUsableEmail(a)) found.push(a); });
     });
     var hits = String(text || '').match(EMAIL_RE) || [];
     hits.forEach(function (e) { if (!BAD_TLD.test(e)) found.push(e); });
-    return found.filter(function (e, i) { return found.indexOf(e) === i; });
+    var seen = {};
+    return found.filter(function (e) { var k = e.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
+  }
+
+  function findEmails(text, hrefs) {
+    return allEmails(text, hrefs).filter(function (e) { return !isSampleEmail(e); });
+  }
+
+  function findSampleEmails(text, hrefs) {
+    return allEmails(text, hrefs).filter(isSampleEmail);
   }
 
   function findPhones(text, hrefs) {
@@ -528,13 +543,18 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var emails = findEmails(text, hrefs);
     var phones = findPhones(text, hrefs);
     var broken = findBrokenMailto(hrefs);
+    var sample = findSampleEmails(text, hrefs);
     var emailMsg = emails.length ? 'Found: ' + emails[0] + '.' : 'No working email found on this page. It may be on the contact page.';
     if (broken.length) {
       emailMsg += ' An email link on this page points to "' + broken[0] + '", and ' + brokenEmailReason(broken[0]) +
         ', so clicking it may not open a working address' + (broken.length > 1 ? ' (' + (broken.length - 1) + ' more like this)' : '') + '.';
     }
+    if (sample.length) {
+      emailMsg += ' This page shows "' + sample[0] + '", which looks like a sample address left from a template rather than your own, so messages sent to it will likely not reach you' +
+        (sample.length > 1 ? ' (' + (sample.length - 1) + ' more like this)' : '') + '.';
+    }
     return [
-      item(G, 'email', 'Email', emails.length && !broken.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
+      item(G, 'email', 'Email', emails.length && !broken.length && !sample.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
       item(G, 'phone', 'Phone', phones.length ? 'ok' : 'check',
         phones.length ? 'Found: ' + phones[0] : 'No phone number found on this page. It may be on the contact page.', DOCS.editorial),
       item(G, 'address', 'Business address', 'check',
@@ -593,7 +613,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     DOCS: DOCS, NOTICE: NOTICE, STATUS_LABEL: STATUS_LABEL,
     parseJsonLd: parseJsonLd, findProduct: findProduct, flattenOffers: flattenOffers,
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
-    collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto,
+    collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto, findSampleEmails: findSampleEmails,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
     analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,

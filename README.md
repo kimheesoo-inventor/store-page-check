@@ -8,7 +8,7 @@ Not affiliated with Google or Shopify. It does not guarantee Merchant Center app
 
 - Policy links: refund/return, shipping, privacy, terms, contact (Shopify default paths recognized)
 - Policy page contents: whether the refund, shipping, privacy and terms pages are empty (heading only), return an error, or still contain template text such as `[LINK TO REFUND POLICY]`
-- Contact details: email and phone visible on the page, and email links whose address cannot work, such as two @ signs (address is left for you to check)
+- Contact details: email and phone visible on the page, email links whose address cannot work, such as two @ signs, and template sample addresses such as support@example.com or contact@yourstore.com (address is left for you to check)
 - Product data, read from JSON-LD and/or microdata (`itemtype` schema.org/Product): name, image, price, currency, availability, brand, identifier, shippingDetails, hasMerchantReturnPolicy. The panel says which format(s) were found; if both exist, JSON-LD values are used and gaps are filled from microdata.
 - Product price vs `og:price:amount`
 - Images with missing or empty alt text

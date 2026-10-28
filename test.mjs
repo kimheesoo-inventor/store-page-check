@@ -302,6 +302,31 @@ t('contacts: mailto with a space or double dot is flagged', () => {
   assert.equal(c.findBrokenMailto(['mailto:info@shop..com']).length, 1);
   assert.equal(c.findBrokenMailto(['tel:+15551234567', '/pages/contact']).length, 0);
 });
+t('contacts: sample template address in a mailto (support@example.com) -> check, named, not counted as found', () => {
+  const r = c.evaluateContacts('', ['mailto:support@example.com']);
+  assert.equal(st(r, 'email'), 'check');
+  const s = JSON.stringify(r);
+  assert.ok(/support@example\.com/.test(s) && /sample address/.test(s), s);
+  assert.equal(c.findEmails('', ['mailto:support@example.com']).length, 0);
+  assert.equal(c.findSampleEmails('', ['mailto:support@example.com']).length, 1);
+});
+t('contacts: real email plus sample address in text -> check, real one still found', () => {
+  const r = c.evaluateContacts('Email us at contact@yourstore.com', ['mailto:hello@shop.example']);
+  assert.equal(st(r, 'email'), 'check');
+  assert.deepEqual(c.findEmails('Email us at contact@yourstore.com', ['mailto:hello@shop.example']), ['hello@shop.example']);
+  assert.ok(/contact@yourstore\.com/.test(JSON.stringify(r)));
+});
+t('contacts: sample domains are matched case-insensitively and with subdomains', () => {
+  assert.equal(c.findSampleEmails('Support@Example.COM', []).length, 1);
+  assert.equal(c.findSampleEmails('', ['mailto:help@mail.yourdomain.com']).length, 1);
+  assert.equal(c.findSampleEmails('info@example.org or info@example.net', []).length, 2);
+});
+t('contacts: lookalike real domains are not treated as sample', () => {
+  assert.equal(c.findSampleEmails('info@myexample.com hi@examplestore.com a@example.co', ['mailto:b@shop.example', 'mailto:c@yourstoreonline.com']).length, 0);
+  assert.equal(c.findSampleEmails('See example.com for details', []).length, 0);
+  assert.equal(c.findSampleEmails('hello@example.community team@yourshop.company', []).length, 0);
+  assert.equal(st(c.evaluateContacts('', ['mailto:info@myexample.com']), 'email'), 'ok');
+});
 t('contacts: international phone pattern', () => {
   assert.equal(c.findPhones('Call +44 20 7946 0958', []).length, 1);
 });
