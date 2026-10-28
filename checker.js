@@ -525,17 +525,42 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return allEmails(text, hrefs).filter(isSampleEmail);
   }
 
-  function findPhones(text, hrefs) {
+  /* Digits only; a leading US country code 1 on an 11-digit number is dropped so +1 (123) 456-7890 and tel:+11234567890 compare equal. */
+  function phoneDigits(p) {
+    var d = String(p || '').replace(/\D/g, '');
+    return d.length === 11 && d.charAt(0) === '1' ? d.slice(1) : d;
+  }
+
+  /* Sample numbers that templates ship with: 123-456-7890, 012-345-6789, one digit repeated (000-000-0000, 555-555-5555), and the 555-0100 to 555-0199 range set aside for fiction. 10-digit numbers only. */
+  function isSamplePhone(p) {
+    var d = phoneDigits(p);
+    if (d.length !== 10) return false;
+    return d === '1234567890' || d === '0123456789' || /^(\d)\1{9}$/.test(d) || /^\d{3}55501\d{2}$/.test(d);
+  }
+
+  function allPhones(text, hrefs) {
     var found = [];
     asArray(hrefs).forEach(function (h) {
       var m = String(h || '').match(/^tel:(.+)$/i);
-      if (m && /\d{6,}/.test(m[1].replace(/\D/g, ''))) found.push(decodeURIComponent(m[1]));
+      if (m && /\d{6,}/.test(m[1].replace(/\D/g, ''))) {
+        var v = m[1];
+        try { v = decodeURIComponent(v); } catch (e) { /* keep raw */ }
+        found.push(v);
+      }
     });
     PHONE_RES.forEach(function (re) {
-      var m = String(text || '').match(re);
-      if (m) found.push(m[0].trim());
+      (String(text || '').match(new RegExp(re.source, 'g')) || []).forEach(function (m) { found.push(m.trim()); });
     });
-    return found.filter(function (e, i) { return found.indexOf(e) === i; });
+    var seen = {};
+    return found.filter(function (e) { var k = phoneDigits(e); if (seen[k]) return false; seen[k] = 1; return true; });
+  }
+
+  function findPhones(text, hrefs) {
+    return allPhones(text, hrefs).filter(function (p) { return !isSamplePhone(p); });
+  }
+
+  function findSamplePhones(text, hrefs) {
+    return allPhones(text, hrefs).filter(isSamplePhone);
   }
 
   function evaluateContacts(text, hrefs) {
@@ -544,6 +569,13 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var phones = findPhones(text, hrefs);
     var broken = findBrokenMailto(hrefs);
     var sample = findSampleEmails(text, hrefs);
+    var samplePh = findSamplePhones(text, hrefs);
+    var phoneMsg = phones.length ? 'Found: ' + phones[0] + '.' :
+      (samplePh.length ? 'No phone number of your own found on this page.' : 'No phone number found on this page. It may be on the contact page.');
+    if (samplePh.length) {
+      phoneMsg += ' This page shows "' + samplePh[0] + '", which looks like a sample number left from a template rather than your own, so customers who call it will likely not reach you' +
+        (samplePh.length > 1 ? ' (' + (samplePh.length - 1) + ' more like this)' : '') + '.';
+    }
     var emailMsg = emails.length ? 'Found: ' + emails[0] + '.' : 'No working email found on this page. It may be on the contact page.';
     if (broken.length) {
       emailMsg += ' An email link on this page points to "' + broken[0] + '", and ' + brokenEmailReason(broken[0]) +
@@ -555,8 +587,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     }
     return [
       item(G, 'email', 'Email', emails.length && !broken.length && !sample.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
-      item(G, 'phone', 'Phone', phones.length ? 'ok' : 'check',
-        phones.length ? 'Found: ' + phones[0] : 'No phone number found on this page. It may be on the contact page.', DOCS.editorial),
+      item(G, 'phone', 'Phone', phones.length && !samplePh.length ? 'ok' : 'check', phoneMsg, DOCS.editorial),
       item(G, 'address', 'Business address', 'check',
         'Not judged by this tool. Please confirm yourself that your business address is shown where customers can find it.', DOCS.editorial)
     ];
@@ -613,7 +644,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     DOCS: DOCS, NOTICE: NOTICE, STATUS_LABEL: STATUS_LABEL,
     parseJsonLd: parseJsonLd, findProduct: findProduct, flattenOffers: flattenOffers,
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
-    collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto, findSampleEmails: findSampleEmails,
+    collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto, findSampleEmails: findSampleEmails, findSamplePhones: findSamplePhones,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
     analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,

@@ -330,6 +330,30 @@ t('contacts: lookalike real domains are not treated as sample', () => {
 t('contacts: international phone pattern', () => {
   assert.equal(c.findPhones('Call +44 20 7946 0958', []).length, 1);
 });
+t('contacts: sample template phone (+1 (123) 456-7890) -> phone check, named, not counted as found', () => {
+  const r = c.evaluateContacts('Call us +1 (123) 456-7890', ['tel:+11234567890']);
+  assert.equal(st(r, 'phone'), 'check');
+  const s = JSON.stringify(r);
+  assert.ok(/\(123\) 456-7890|\+11234567890/.test(s) && /sample number/.test(s), s);
+  assert.equal(c.findPhones('Call us +1 (123) 456-7890', ['tel:+11234567890']).length, 0);
+  assert.equal(c.findSamplePhones('Call us +1 (123) 456-7890', ['tel:+11234567890']).length, 1);
+});
+t('contacts: real phone plus sample phone -> check, real one still found', () => {
+  const text = 'Call 503-555-2368. Template line: 123-456-7890';
+  assert.equal(st(c.evaluateContacts(text, []), 'phone'), 'check');
+  assert.deepEqual(c.findPhones(text, []), ['503-555-2368']);
+  assert.equal(c.findSamplePhones(text, []).length, 1);
+});
+t('contacts: other well-known sample numbers are flagged', () => {
+  assert.equal(c.findSamplePhones('000-000-0000', []).length, 1);
+  assert.equal(c.findSamplePhones('', ['tel:555-555-5555']).length, 1);
+  assert.equal(c.findSamplePhones('(212) 555-0123', []).length, 1);
+  assert.equal(c.findSamplePhones('012-345-6789', []).length, 1);
+});
+t('contacts: lookalike real numbers are not treated as sample', () => {
+  assert.equal(c.findSamplePhones('(555) 123-4567 or (503) 555-2368 or (212) 555-0200 or +44 20 7946 0958', ['tel:+15551234567']).length, 0);
+  assert.equal(st(c.evaluateContacts('Call (503) 555-2368', []), 'phone'), 'ok');
+});
 
 /* ---- images ---- */
 t('alt: all have alt -> ok', () => assert.equal(c.evaluateAlt([{ alt: 'a' }, { alt: 'b' }]).status, 'ok'));
