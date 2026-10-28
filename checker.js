@@ -365,7 +365,9 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   /* ---- policy page contents ---- */
   var PLACEHOLDER_RES = [
     /\[(?:link to|insert|enter|your|store|company|business|email(?!\s+protected)|phone|address|name|date|number|url)\b[^\]\n]{0,80}\]/gi,
-    /\[[A-Z][A-Z0-9 _\-\/'&.,]{3,60}\]/g
+    /\[[A-Z][A-Z0-9 _\-\/'&.,]{3,60}\]/g,
+    /* Shopify's privacy template leaves owner-only notes such as "[NOTE TO MERCHANT: INSERT THE FOLLOWING IF ...]". */
+    /\[note to merchants?\b[^\]\n]{0,200}\]/gi
   ];
   var MIN_POLICY_CHARS = 40;
 

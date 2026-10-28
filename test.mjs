@@ -422,6 +422,19 @@ t('analyzePolicyText: [LINK TO PRIVACY POLICY], [INSERT ...] and [STORE NAME] ar
   const r = c.analyzePolicyText('[STORE NAME] respects privacy. [INSERT EMAIL HERE] or [LINK TO PRIVACY POLICY].');
   assert.deepEqual(r.placeholders.slice().sort(), ['[INSERT EMAIL HERE]', '[LINK TO PRIVACY POLICY]', '[STORE NAME]']);
 });
+t('analyzePolicyText: a leftover [NOTE TO MERCHANT: ...] line is found (Shopify privacy template)', () => {
+  const note = '[NOTE TO MERCHANT: INSERT THE FOLLOWING IF YOUR SITE IS GOVERNED BY GDPR]';
+  const r = c.analyzePolicyText('We respect your privacy. ' + note + ' If you are in the EEA, you have rights.');
+  assert.deepEqual(r.placeholders, [note]);
+});
+t('analyzePolicyText: mixed-case [Note to merchant: ...] is found', () => {
+  const r = c.analyzePolicyText('Policy text here. [Note to merchant: delete this paragraph if you do not ship abroad] More text.');
+  assert.deepEqual(r.placeholders, ['[Note to merchant: delete this paragraph if you do not ship abroad]']);
+});
+t('analyzePolicyText: optional template words [EEA], [the UK], [and] and a plain "Note to merchants:" are not flagged', () => {
+  const r = c.analyzePolicyText('Residents of the [EEA] [and] [the UK] may ask. Note to merchants: none. [Note] stays quiet.');
+  assert.equal(r.placeholders.length, 0);
+});
 t('analyzePolicyText: lowercase brackets such as [optional] are not flagged', () => {
   assert.equal(c.analyzePolicyText('Pay by card [optional] or [see below] or [Note].').placeholders.length, 0);
 });
