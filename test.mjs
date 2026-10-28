@@ -355,6 +355,94 @@ t('contacts: lookalike real numbers are not treated as sample', () => {
   assert.equal(st(c.evaluateContacts('Call (503) 555-2368', []), 'phone'), 'ok');
 });
 
+/* ---- contact details: typo endings, quoted email links, Shopify's own social accounts ---- */
+t('contacts: email ending in a typo (erin@fortecandles.ccom, real case) -> check, named, not counted as found', () => {
+  const text = 'Email: erin@fortecandles.ccom';
+  const r = c.evaluateContacts(text, []);
+  assert.equal(st(r, 'email'), 'check');
+  const s = JSON.stringify(r);
+  assert.ok(/erin@fortecandles\.ccom/.test(s) && /\.ccom/.test(s) && /typo for \\"\.com\\"/.test(s), s);
+  assert.equal(c.findEmails(text, []).length, 0);
+  assert.deepEqual(c.findTypoEmails(text, []), ['erin@fortecandles.ccom']);
+});
+t('contacts: real email plus typo email -> check, only the typo one is named as a typo, real one still found', () => {
+  const text = 'Write to hello@fortecandles.com or erin@fortecandles.ccom';
+  const r = c.evaluateContacts(text, []);
+  assert.equal(st(r, 'email'), 'check');
+  assert.deepEqual(c.findEmails(text, []), ['hello@fortecandles.com']);
+  assert.deepEqual(c.findTypoEmails(text, []), ['erin@fortecandles.ccom']);
+  const reason = r.find((x) => x.id === 'email').reason;
+  assert.ok(/^Found: hello@fortecandles\.com\./.test(reason), reason);
+  assert.ok(!/"hello@fortecandles\.com"/.test(reason), reason);
+});
+t('contacts: every listed typo ending is flagged, in text and in a mailto, any letter case', () => {
+  for (const e of ['ccom', 'comm', 'coom', 'cmo', 'ocm', 'cpm', 'vom', 'xom', 'con', 'cim', 'clm', 'nett', 'ogr', 'rog']) {
+    assert.equal(c.findTypoEmails('info@shop.' + e, []).length, 1, e);
+    assert.equal(c.findTypoEmails('', ['mailto:info@shop.' + e.toUpperCase()]).length, 1, e);
+    assert.equal(st(c.evaluateContacts('', ['mailto:info@shop.' + e]), 'email'), 'check', e);
+  }
+  assert.ok(/typo for \\"\.org\\"/.test(JSON.stringify(c.evaluateContacts('a@shop.ogr', []))));
+  assert.ok(/typo for \\"\.net\\"/.test(JSON.stringify(c.evaluateContacts('a@shop.nett', []))));
+});
+t('contacts: real endings (.co, .com.au, .om, .cm, .net, .org, .io, .us, .community, .construction) are not typos', () => {
+  const text = 'info@shop.co hello@brand.com.au a@b.om a@b.cm a@b.net a@b.org a@b.io a@b.us team@b.community x@b.construction y@b.company';
+  assert.equal(c.findTypoEmails(text, ['mailto:info@x.com']).length, 0);
+  assert.equal(st(c.evaluateContacts('', ['mailto:info@shop.co']), 'email'), 'ok');
+  assert.equal(st(c.evaluateContacts('Email hello@brand.com.au', []), 'email'), 'ok');
+  assert.equal(st(c.evaluateContacts('', ['mailto:info@x.com']), 'email'), 'ok');
+});
+t('contacts: email link with the address wrapped in quote marks (mailto:\'...\', real case) -> check, not counted as found', () => {
+  const href = "mailto:'sandraerdenjewelry@gmail.com'";
+  assert.deepEqual(c.findBrokenMailto([href]), ["'sandraerdenjewelry@gmail.com'"]);
+  assert.equal(c.findEmails('', [href]).length, 0);
+  const r = c.evaluateContacts('', [href]);
+  assert.equal(st(r, 'email'), 'check');
+  assert.ok(/quote marks or angle brackets/.test(JSON.stringify(r)), JSON.stringify(r));
+  const r2 = c.evaluateContacts('sandraerdenjewelry@gmail.com', [href]);
+  assert.equal(st(r2, 'email'), 'check');
+  assert.ok(/^Found: sandraerdenjewelry@gmail\.com\./.test(r2.find((x) => x.id === 'email').reason));
+});
+t('contacts: double quotes, encoded quotes, angle brackets, backticks, curly quotes and a trailing quote in a mailto are flagged', () => {
+  const bad = ['mailto:"info@shop.com"', 'mailto:%22info@shop.com%22', 'mailto:<info@shop.com>', 'mailto:%3Cinfo@shop.com%3E', 'mailto:`info@shop.com`',
+    'mailto:\u201Cinfo@shop.com\u201D', "mailto:info@shop.com'", "mailto:info'@shop.com", "mailto:info@'shop.com"];
+  for (const h of bad) assert.equal(c.findBrokenMailto([h]).length, 1, h);
+});
+t('contacts: plain mailto and an apostrophe inside the name part (o\'brien@shop.com) are not flagged as quoted', () => {
+  assert.equal(c.findBrokenMailto(['mailto:info@x.com', "mailto:o'brien@shop.com", 'mailto:info@x.com?subject=Hi']).length, 0);
+  assert.equal(st(c.evaluateContacts('', ['mailto:info@x.com']), 'email'), 'ok');
+});
+t('contacts: social link to Shopify\'s own account (twitter.com/shopify, real case) -> check with a plain reason', () => {
+  const r = c.evaluateContacts('', ['https://www.twitter.com/shopify', 'https://www.instagram.com/wecocandleco'], 'wecocandleco.com');
+  assert.equal(st(r, 'social-shopify'), 'check');
+  const reason = r.find((x) => x.id === 'social-shopify').reason;
+  assert.ok(/twitter\.com\/shopify/.test(reason) && /Shopify's own account/.test(reason) && /theme sample link was never replaced/.test(reason), reason);
+  assert.deepEqual(c.findShopifySocialLinks(['https://www.twitter.com/shopify'], 'wecocandleco.com'), ['https://www.twitter.com/shopify']);
+  const all = c.runChecks({ jsonLdTexts: [], links: [{ href: 'https://www.twitter.com/shopify', text: '' }], text: '', ogType: 'website', path: '/', imgs: [], host: 'wecocandleco.com' });
+  assert.equal(st(all.items, 'social-shopify'), 'check');
+});
+t('contacts: Shopify account links on each social site and URL form are flagged (case, trailing slash, query ignored)', () => {
+  const links = ['https://x.com/Shopify/', 'https://facebook.com/shopify?ref=footer', 'https://m.facebook.com/shopify', 'https://instagram.com/shopify/', 'https://www.pinterest.com/shopify/',
+    'https://www.tiktok.com/@shopify', 'https://www.youtube.com/@Shopify', 'https://www.youtube.com/user/shopify', 'https://youtube.com/c/Shopify', 'https://www.youtube.com/shopify',
+    'https://www.linkedin.com/company/shopify/', '//twitter.com/shopify#top'];
+  for (const h of links) assert.equal(c.findShopifySocialLinks([h], 'brand.example').length, 1, h);
+  const r = c.evaluateContacts('', ['https://twitter.com/shopify', 'https://twitter.com/shopify/', 'https://facebook.com/shopify'], 'brand.example');
+  assert.ok(/\(1 more like this\)/.test(r.find((x) => x.id === 'social-shopify').reason));
+});
+t('contacts: real brand social links, share buttons and lookalike Shopify accounts are not flagged', () => {
+  const ok = ['https://twitter.com/somebrand', 'https://twitter.com/shopifyhelp', 'https://twitter.com/intent/tweet?text=shopify&url=https://shop.example',
+    'https://www.facebook.com/sharer/sharer.php?u=https://shopify.com', 'https://www.facebook.com/sharer.php?u=shopify', 'https://pinterest.com/pin/create/button/?url=shopify',
+    'https://www.instagram.com/somebrand/shopify', 'https://www.tiktok.com/@shopifyhelp', 'https://www.youtube.com/@shopifystudios', 'https://www.linkedin.com/company/shopify-plus',
+    'https://www.shopify.com/', 'https://apps.shopify.com/shopify', '/pages/shopify', 'mailto:shopify@brand.example', 'https://notx.com/shopify'];
+  assert.equal(c.findShopifySocialLinks(ok, 'brand.example').length, 0);
+  const r = c.evaluateContacts('Email info@x.com', ['https://twitter.com/somebrand', 'https://twitter.com/intent/tweet']);
+  assert.equal(r.length, 3);
+  assert.ok(!r.some((x) => x.id === 'social-shopify'));
+});
+t('contacts: on Shopify\'s own site, links to its own accounts are not flagged', () => {
+  assert.equal(c.findShopifySocialLinks(['https://twitter.com/shopify', 'https://www.facebook.com/shopify'], 'www.shopify.com').length, 0);
+  assert.equal(c.findShopifySocialLinks(['https://twitter.com/shopify'], 'mystore.myshopify.com').length, 1);
+});
+
 /* ---- images ---- */
 t('alt: all have alt -> ok', () => assert.equal(c.evaluateAlt([{ alt: 'a' }, { alt: 'b' }]).status, 'ok'));
 t('alt: missing and empty alt -> check', () => {

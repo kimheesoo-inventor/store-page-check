@@ -471,9 +471,17 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   ];
   var BAD_TLD = /\.(png|jpe?g|gif|webp|svg|avif|css|js)$/i;
 
-  /* A usable address: exactly one @, no spaces, a dot in the domain, an ending of 2+ letters. Lenient on purpose. */
+  /* Quote marks or angle brackets that stop an address from working as typed: " < > and curly quotes anywhere; ' or ` at either end, next to @, or after @. An apostrophe inside the name part (o'brien@shop.com) is allowed. */
+  function hasQuoteProblem(a) {
+    var s = String(a || '');
+    if (/["<>\u2018\u2019\u201C\u201D]/.test(s)) return true;
+    var at = s.lastIndexOf('@');
+    return /^['`]|['`]$|['`]@/.test(s) || (at >= 0 && /['`]/.test(s.slice(at + 1)));
+  }
+
+  /* A usable address: exactly one @, no spaces, a dot in the domain, an ending of 2+ letters, no quote marks around it. Lenient on purpose. */
   function isUsableEmail(a) {
-    return /^[^\s@]+@[^\s@.][^\s@]*\.[^\s@.]{2,}$/.test(a) && !/\.\./.test(a.split('@')[1] || '');
+    return /^[^\s@]+@[^\s@.][^\s@]*\.[^\s@.]{2,}$/.test(a) && !/\.\./.test(a.split('@')[1] || '') && !hasQuoteProblem(a);
   }
 
   /* Addresses inside a mailto: link (comma-separated allowed). null if not a mailto link; [] for share links with no address. */
@@ -500,6 +508,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var at = (a.match(/@/g) || []).length;
     if (at > 1) return 'it has more than one @ sign';
     if (at === 0) return 'it has no @ sign';
+    if (hasQuoteProblem(a)) return 'it has quote marks or angle brackets around or inside the address';
     if (/\s/.test(a)) return 'it contains a space';
     return 'the part after @ is not a complete domain such as example.com';
   }
@@ -521,12 +530,54 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return found.filter(function (e) { var k = e.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
   }
 
+  /* Endings that are common typos of .com, .net and .org (erin@shop.ccom). Real endings such as .co, .cm, .om, .net and .org are not on the list. */
+  var TYPO_TLD = { ccom: 'com', comm: 'com', coom: 'com', cmo: 'com', ocm: 'com', cpm: 'com', vom: 'com', xom: 'com', con: 'com', cim: 'com', clm: 'com', nett: 'net', ogr: 'org', rog: 'org' };
+  /* The typo ending (lowercase) of an address, or '' when the ending is fine. */
+  function typoTld(a) {
+    var tld = String(a || '').split('@').pop().split('.').pop().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(TYPO_TLD, tld) ? tld : '';
+  }
+
   function findEmails(text, hrefs) {
-    return allEmails(text, hrefs).filter(function (e) { return !isSampleEmail(e); });
+    return allEmails(text, hrefs).filter(function (e) { return !isSampleEmail(e) && !typoTld(e); });
   }
 
   function findSampleEmails(text, hrefs) {
     return allEmails(text, hrefs).filter(isSampleEmail);
+  }
+
+  function findTypoEmails(text, hrefs) {
+    return allEmails(text, hrefs).filter(function (e) { return !isSampleEmail(e) && !!typoTld(e); });
+  }
+
+  /* Social links that go to Shopify's own account (twitter.com/shopify), usually a theme sample link left in place. Share buttons (twitter.com/intent/..., facebook.com/sharer...) do not match. */
+  var SOCIAL_SITES = ['twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'pinterest.com', 'tiktok.com', 'youtube.com', 'linkedin.com'];
+  function isShopifySocialLink(href) {
+    var h = bareHost(hostOf(href));
+    var site = '';
+    SOCIAL_SITES.forEach(function (s) { if (h === s || h.slice(-(s.length + 1)) === '.' + s) site = s; });
+    if (!site) return false;
+    var segs = pathOf(href).split('/').filter(Boolean).map(function (p) {
+      try { return decodeURIComponent(p).toLowerCase(); } catch (e) { return p.toLowerCase(); }
+    });
+    if (segs[0] === 'shopify') return true;
+    if ((site === 'tiktok.com' || site === 'youtube.com') && segs[0] === '@shopify') return true;
+    if (site === 'youtube.com' && (segs[0] === 'user' || segs[0] === 'c') && segs[1] === 'shopify') return true;
+    if (site === 'linkedin.com' && segs[0] === 'company' && segs[1] === 'shopify') return true;
+    return false;
+  }
+
+  /* hrefs on the page that go to Shopify's own social accounts. Skipped on Shopify's own site, where these links are its real accounts. */
+  function findShopifySocialLinks(hrefs, ownHost) {
+    if (/(^|\.)shopify\.com$/.test(bareHost(ownHost))) return [];
+    var seen = {};
+    return asArray(hrefs).map(function (h) { return String(h || '').trim(); }).filter(function (h) {
+      if (!isShopifySocialLink(h)) return false;
+      var k = h.toLowerCase().replace(/[?#].*$/, '').replace(/\/+$/, '');
+      if (seen[k]) return false;
+      seen[k] = 1;
+      return true;
+    });
   }
 
   /* Digits only; a leading US country code 1 on an 11-digit number is dropped so +1 (123) 456-7890 and tel:+11234567890 compare equal. */
@@ -567,9 +618,11 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return allPhones(text, hrefs).filter(isSamplePhone);
   }
 
-  function evaluateContacts(text, hrefs) {
+  function evaluateContacts(text, hrefs, ownHost) {
     var G = 'Contact details on this page';
     var emails = findEmails(text, hrefs);
+    var typo = findTypoEmails(text, hrefs);
+    var social = findShopifySocialLinks(hrefs, ownHost);
     var phones = findPhones(text, hrefs);
     var broken = findBrokenMailto(hrefs);
     var sample = findSampleEmails(text, hrefs);
@@ -589,12 +642,23 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
       emailMsg += ' This page shows "' + sample[0] + '", which looks like a sample address left from a template rather than your own, so messages sent to it will likely not reach you' +
         (sample.length > 1 ? ' (' + (sample.length - 1) + ' more like this)' : '') + '.';
     }
-    return [
-      item(G, 'email', 'Email', emails.length && !broken.length && !sample.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
-      item(G, 'phone', 'Phone', phones.length && !samplePh.length ? 'ok' : 'check', phoneMsg, DOCS.editorial),
-      item(G, 'address', 'Business address', 'check',
-        'Not judged by this tool. Please confirm yourself that your business address is shown where customers can find it.', DOCS.editorial)
+    if (typo.length) {
+      var ending = typo[0].split('.').pop();
+      emailMsg += ' This page shows "' + typo[0] + '", which ends in ".' + ending + '", probably a typo for ".' + TYPO_TLD[ending.toLowerCase()] + '", so messages sent to it will not reach you' +
+        (typo.length > 1 ? ' (' + (typo.length - 1) + ' more like this)' : '') + '.';
+    }
+    var out = [
+      item(G, 'email', 'Email', emails.length && !broken.length && !sample.length && !typo.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
+      item(G, 'phone', 'Phone', phones.length && !samplePh.length ? 'ok' : 'check', phoneMsg, DOCS.editorial)
     ];
+    if (social.length) {
+      out.push(item(G, 'social-shopify', 'Social link', 'check',
+        'A social link on this page goes to Shopify\'s own account: "' + social[0] + '"' + (social.length > 1 ? ' (' + (social.length - 1) + ' more like this)' : '') +
+        '. This usually means a theme sample link was never replaced; change it to your own account or remove it.', DOCS.editorial));
+    }
+    out.push(item(G, 'address', 'Business address', 'check',
+      'Not judged by this tool. Please confirm yourself that your business address is shown where customers can find it.', DOCS.editorial));
+    return out;
   }
 
   /* imgs: [{alt: string|null, role, ariaHidden}] */
@@ -637,7 +701,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var looksLikeProduct = /\/products\//i.test(path) || String(input.ogType || '').toLowerCase() === 'product';
     var items = [];
     items = items.concat(matchPolicyLinks(input.links || [], input.host || ''));
-    items = items.concat(evaluateContacts(input.text || '', (input.links || []).map(function (l) { return l.href; })));
+    items = items.concat(evaluateContacts(input.text || '', (input.links || []).map(function (l) { return l.href; }), input.host || ''));
     items = items.concat(evaluateProduct(product, { looksLikeProduct: looksLikeProduct, formats: formats }));
     items.push(comparePrices(product ? collectPrices(product) : [], input.ogPrice));
     items.push(evaluateAlt(input.imgs || []));
@@ -649,6 +713,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     parseJsonLd: parseJsonLd, findProduct: findProduct, flattenOffers: flattenOffers,
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto, findSampleEmails: findSampleEmails, findSamplePhones: findSamplePhones,
+    findTypoEmails: findTypoEmails, findShopifySocialLinks: findShopifySocialLinks,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
     analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,
