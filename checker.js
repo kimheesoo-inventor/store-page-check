@@ -369,6 +369,8 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     /* Shopify's privacy template leaves owner-only notes such as "[NOTE TO MERCHANT: INSERT THE FOLLOWING IF ...]". */
     /\[note to merchants?\b[^\]\n]{0,200}\]/gi
   ];
+  /* Shopify's terms template has a "Relationship with Shopify" note that says the section "should not be removed or modified". Many stores, large ones included, keep it on purpose, so it is not flagged. */
+  var KEPT_NOTE_RE = /should not be removed or modified/i;
   var MIN_POLICY_CHARS = 40;
 
   function analyzePolicyText(text) {
@@ -376,7 +378,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var found = [];
     PLACEHOLDER_RES.forEach(function (re) {
       var m = clean.match(re) || [];
-      m.forEach(function (p) { if (found.indexOf(p) === -1) found.push(p); });
+      m.forEach(function (p) { if (!KEPT_NOTE_RE.test(p) && found.indexOf(p) === -1) found.push(p); });
     });
     return { length: clean.length, placeholders: found.slice(0, 5) };
   }

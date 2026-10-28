@@ -431,6 +431,15 @@ t('analyzePolicyText: mixed-case [Note to merchant: ...] is found', () => {
   const r = c.analyzePolicyText('Policy text here. [Note to merchant: delete this paragraph if you do not ship abroad] More text.');
   assert.deepEqual(r.placeholders, ['[Note to merchant: delete this paragraph if you do not ship abroad]']);
 });
+t('analyzePolicyText: the terms template note that says "should not be removed or modified" is not flagged (stores keep it on purpose)', () => {
+  const kept = '[NOTE TO MERCHANT: This section accurately characterizes Shopify\'s relationship with your store and should not be removed or modified.]';
+  assert.equal(c.analyzePolicyText('SECTION 9 - RELATIONSHIP WITH SHOPIFY ' + kept + ' Our store is powered by Shopify.').placeholders.length, 0);
+});
+t('analyzePolicyText: a terms page with the kept note and a real [LINK] blank lists only [LINK]', () => {
+  const kept = '[NOTE TO MERCHANT: This section accurately characterizes Shopify\'s relationship with your store and should not be removed or modified.]';
+  const r = c.analyzePolicyText(kept + ' Our Privacy Policy can be viewed here [LINK].');
+  assert.deepEqual(r.placeholders, ['[LINK]']);
+});
 t('analyzePolicyText: optional template words [EEA], [the UK], [and] and a plain "Note to merchants:" are not flagged', () => {
   const r = c.analyzePolicyText('Residents of the [EEA] [and] [the UK] may ask. Note to merchants: none. [Note] stays quiet.');
   assert.equal(r.placeholders.length, 0);
