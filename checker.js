@@ -467,11 +467,43 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
   ];
   var BAD_TLD = /\.(png|jpe?g|gif|webp|svg|avif|css|js)$/i;
 
+  /* A usable address: exactly one @, no spaces, a dot in the domain, an ending of 2+ letters. Lenient on purpose. */
+  function isUsableEmail(a) {
+    return /^[^\s@]+@[^\s@.][^\s@]*\.[^\s@.]{2,}$/.test(a) && !/\.\./.test(a.split('@')[1] || '');
+  }
+
+  /* Addresses inside a mailto: link (comma-separated allowed). null if not a mailto link; [] for share links with no address. */
+  function mailtoAddresses(h) {
+    var m = String(h || '').trim().match(/^mailto:([^?#]*)/i);
+    if (!m) return null;
+    var raw = m[1];
+    try { raw = decodeURIComponent(raw); } catch (e) { /* keep raw */ }
+    return raw.split(',').map(function (a) { return a.trim(); }).filter(function (a) { return a !== ''; });
+  }
+
+  /* mailto links whose address would not work (for example two @ signs, no dot in the domain, a space). */
+  function findBrokenMailto(hrefs) {
+    var bad = [];
+    asArray(hrefs).forEach(function (h) {
+      (mailtoAddresses(h) || []).forEach(function (a) {
+        if (!isUsableEmail(a) && bad.indexOf(a) === -1) bad.push(a);
+      });
+    });
+    return bad;
+  }
+
+  function brokenEmailReason(a) {
+    var at = (a.match(/@/g) || []).length;
+    if (at > 1) return 'it has more than one @ sign';
+    if (at === 0) return 'it has no @ sign';
+    if (/\s/.test(a)) return 'it contains a space';
+    return 'the part after @ is not a complete domain such as example.com';
+  }
+
   function findEmails(text, hrefs) {
     var found = [];
     asArray(hrefs).forEach(function (h) {
-      var m = String(h || '').match(/^mailto:([^?]+)/i);
-      if (m && /@/.test(m[1])) found.push(decodeURIComponent(m[1]));
+      (mailtoAddresses(h) || []).forEach(function (a) { if (isUsableEmail(a)) found.push(a); });
     });
     var hits = String(text || '').match(EMAIL_RE) || [];
     hits.forEach(function (e) { if (!BAD_TLD.test(e)) found.push(e); });
@@ -495,9 +527,14 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var G = 'Contact details on this page';
     var emails = findEmails(text, hrefs);
     var phones = findPhones(text, hrefs);
+    var broken = findBrokenMailto(hrefs);
+    var emailMsg = emails.length ? 'Found: ' + emails[0] + '.' : 'No working email found on this page. It may be on the contact page.';
+    if (broken.length) {
+      emailMsg += ' An email link on this page points to "' + broken[0] + '", and ' + brokenEmailReason(broken[0]) +
+        ', so clicking it may not open a working address' + (broken.length > 1 ? ' (' + (broken.length - 1) + ' more like this)' : '') + '.';
+    }
     return [
-      item(G, 'email', 'Email', emails.length ? 'ok' : 'check',
-        emails.length ? 'Found: ' + emails[0] : 'No email found on this page. It may be on the contact page.', DOCS.editorial),
+      item(G, 'email', 'Email', emails.length && !broken.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
       item(G, 'phone', 'Phone', phones.length ? 'ok' : 'check',
         phones.length ? 'Found: ' + phones[0] : 'No phone number found on this page. It may be on the contact page.', DOCS.editorial),
       item(G, 'address', 'Business address', 'check',
@@ -556,7 +593,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     DOCS: DOCS, NOTICE: NOTICE, STATUS_LABEL: STATUS_LABEL,
     parseJsonLd: parseJsonLd, findProduct: findProduct, flattenOffers: flattenOffers,
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
-    collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails,
+    collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto,
     findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
     analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,

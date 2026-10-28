@@ -276,6 +276,32 @@ t('contacts: neither present -> check/check', () => {
 t('contacts: image file name with @2x is not an email', () => {
   assert.equal(c.findEmails('logo@2x.png', []).length, 0);
 });
+t('contacts: mailto with two @ signs -> email check, address named, not counted as found', () => {
+  const r = c.evaluateContacts('', ['mailto:hello@sharonmoskal@gmail.com']);
+  assert.equal(st(r, 'email'), 'check');
+  const msg = r.find((x) => x.id === 'email' || /email/i.test(x.label)).message || JSON.stringify(r);
+  assert.ok(/hello@sharonmoskal@gmail\.com/.test(JSON.stringify(r)) && /more than one @/.test(JSON.stringify(r)), msg);
+  assert.equal(c.findEmails('', ['mailto:hello@sharonmoskal@gmail.com']).length, 0);
+});
+t('contacts: valid email plus one broken mailto -> still check', () => {
+  const r = c.evaluateContacts('Write to help@shop.example', ['mailto:help@shopexample']);
+  assert.equal(st(r, 'email'), 'check');
+  assert.ok(/not a complete domain/.test(JSON.stringify(r)));
+});
+t('contacts: share-by-email mailto with no address is not flagged', () => {
+  assert.equal(c.findBrokenMailto(['mailto:?subject=Look&body=https%3A%2F%2Fshop.example']).length, 0);
+  assert.equal(c.findBrokenMailto(['mailto:']).length, 0);
+});
+t('contacts: two addresses in one mailto and encoded @ are fine', () => {
+  const r = c.evaluateContacts('', ['mailto:a@shop.example,b@shop.example', 'mailto:hello%40shop.example']);
+  assert.equal(st(r, 'email'), 'ok');
+  assert.equal(c.findBrokenMailto(['mailto:a@shop.example, b@shop.example', 'mailto:hello%40shop.example']).length, 0);
+});
+t('contacts: mailto with a space or double dot is flagged', () => {
+  assert.equal(c.findBrokenMailto(['mailto:info@shop .com']).length, 1);
+  assert.equal(c.findBrokenMailto(['mailto:info@shop..com']).length, 1);
+  assert.equal(c.findBrokenMailto(['tel:+15551234567', '/pages/contact']).length, 0);
+});
 t('contacts: international phone pattern', () => {
   assert.equal(c.findPhones('Call +44 20 7946 0958', []).length, 1);
 });
