@@ -761,6 +761,37 @@ t('evaluateContactInfoPage: 404, failed, skipped, other site, empty -> null', ()
   assert.equal(c.evaluateContactInfoPage(ci200('   ')), null);
   assert.equal(c.evaluateContactInfoPage(undefined), null);
 });
+/* ---- phone numbers cut short (PetsuppliesHQ case: "Phone number: 940-373-2") ---- */
+t('evaluateContactInfoPage: phone cut short (PetsuppliesHQ case) -> check naming it and the digit count', () => {
+  const r = c.evaluateContactInfoPage(ci200('Pet Supplies HQ Haslet, Texas Phone number: 940-373-2'));
+  assert.equal(r.status, 'check'); assert.ok(r.reason.includes('"940-373-2"'), r.reason); assert.ok(r.reason.includes('only 7 digits'), r.reason);
+});
+t('findShortPhones: 7 or 8 digit US-shaped numbers after a phone word are flagged', () => {
+  assert.deepEqual(c.findShortPhones('Phone number: 940-373-2', []), ['940-373-2']);
+  assert.deepEqual(c.findShortPhones('Call us (940) 373-22 today', []), ['(940) 373-22']);
+  assert.deepEqual(c.findShortPhones('Tel: +1 940 373 2', []), ['+1 940 373 2']);
+  assert.deepEqual(c.findShortPhones('Phone: 1-800-123-45', []), ['1-800-123-45']);
+  assert.deepEqual(c.findShortPhones('', ['tel:+19403732']), ['+19403732']);
+  assert.deepEqual(c.findShortPhones('', ['tel:%2B1%20940%20373%202']), ['+1 940 373 2']);
+});
+t('findShortPhones: full US numbers, numbers without a phone word, and other countries are not flagged', () => {
+  assert.equal(c.findShortPhones('Phone: 940-373-2841. Call us (518) 354-0445. Phone number: +1 518-354-0445', ['tel:+15183540445']).length, 0);
+  assert.equal(c.findShortPhones('Order 940-373-2 shipped. SKU 512-334-12', []).length, 0);
+  assert.equal(c.findShortPhones('Tel: 912 345 678 (Spain). Tel: 030 123 456. Phone: 0161 496 0000. Phone: 1300 123 456', []).length, 0);
+  assert.equal(c.findShortPhones('Telefono: 333 123 4567. Tel: +44 20 7946 0958. Tel: 6123 4567. Phone: +91 98765 43210. Phone: 940 373 28 41', ['tel:12345678', 'tel:+6561234567']).length, 0);
+  assert.equal(c.findShortPhones('My smartphone 940-373-2 and Telegram: 940-373-2', []).length, 0);
+});
+t('contacts: phone cut short on the page -> phone row check with the reason; full phone stays ok', () => {
+  const r = c.evaluateContacts('Phone number: 940-373-2', []);
+  assert.equal(st(r, 'phone'), 'check');
+  assert.ok(/940-373-2/.test(JSON.stringify(r)) && /cut short/.test(JSON.stringify(r)));
+  assert.equal(st(c.evaluateContacts('Phone number: 940-373-2841', []), 'phone'), 'ok');
+  assert.equal(st(c.evaluateContacts('Call (503) 555-2368. Phone: 940-373-2', []), 'phone'), 'check');
+});
+t('evaluateContactInfoPage: Maple Shop control page stays ok after the short-phone rule', () => {
+  const r = c.evaluateContactInfoPage(ci200('Trade name: Maple Shop. Email: marcy@mapleshoplakeplacid.com Phone: 518-354-0445'));
+  assert.equal(r.status, 'ok');
+});
 
 console.log('\nTotal: ' + (pass + fail) + '  Passed: ' + pass + '  Failed: ' + fail);
 process.exit(fail ? 1 : 0);

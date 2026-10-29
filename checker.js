@@ -619,6 +619,27 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     return allPhones(text, hrefs).filter(isSamplePhone);
   }
 
+  /* A US-style number right after a word like "Phone" or "Call" that stops short: area code (first digit 2-9) and 3 digits, then only 1 or 2 more digits (940-373-2).
+     Numbers starting with 0 or 1 (UK, Germany, Australia) and 3-3-3 numbers (Spain) are left alone. Also tel:+1 links with only 7 or 8 digits after the 1. */
+  var SHORT_PHONE_RE = /\b(?:phone|telephone|tel|call(?:\s+us)?|mobile|cell)\b(?:\s+(?:number|no\.?|#))?\s*[:#.\-]?\s*((?:\+?1[\s.\-]?)?\(?[2-9]\d{2}\)?[\s.\-]\d{3}[\s.\-]\d{1,2})(?![\s.\-]?\d)/gi;
+  function findShortPhones(text, hrefs) {
+    var found = [];
+    asArray(hrefs).forEach(function (h) {
+      var raw = String(h || '');
+      try { raw = decodeURIComponent(raw); } catch (e) { /* keep raw */ }
+      var m = raw.match(/^tel:\s*(\+\s*1.*)$/i);
+      if (m) { var d = m[1].replace(/\D/g, '').slice(1); if (d.length >= 7 && d.length <= 8) found.push(m[1].trim()); }
+    });
+    var re = new RegExp(SHORT_PHONE_RE.source, 'gi'), mm, s = String(text || '');
+    while ((mm = re.exec(s))) found.push(mm[1].trim());
+    var seen = {};
+    return found.filter(function (p) { var k = p.replace(/\D/g, ''); if (seen[k]) return false; seen[k] = 1; return true; });
+  }
+  function shortPhoneDigits(p) {
+    var d = String(p || '').replace(/\D/g, '');
+    return /^\s*(?:\+\s*1|1[\s.\-(])/.test(String(p || '')) ? d.length - 1 : d.length;
+  }
+
   function evaluateContacts(text, hrefs, ownHost) {
     var G = 'Contact details on this page';
     var emails = findEmails(text, hrefs);
@@ -628,11 +649,17 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var broken = findBrokenMailto(hrefs);
     var sample = findSampleEmails(text, hrefs);
     var samplePh = findSamplePhones(text, hrefs);
+    var shortPh = findShortPhones(text, hrefs);
     var phoneMsg = phones.length ? 'Found: ' + phones[0] + '.' :
       (samplePh.length ? 'No phone number of your own found on this page.' : 'No phone number found on this page. It may be on the contact page.');
     if (samplePh.length) {
       phoneMsg += ' This page shows "' + samplePh[0] + '", which looks like a sample number left from a template rather than your own, so customers who call it will likely not reach you' +
         (samplePh.length > 1 ? ' (' + (samplePh.length - 1) + ' more like this)' : '') + '.';
+    }
+    if (shortPh.length) {
+      phoneMsg += ' This page shows "' + shortPh[0] + '" as a phone number, but it has only ' + shortPhoneDigits(shortPh[0]) +
+        ' digits (a US number has 10), so it looks cut short and calls to it may not go through' +
+        (shortPh.length > 1 ? ' (' + (shortPh.length - 1) + ' more like this)' : '') + '.';
     }
     var emailMsg = emails.length ? 'Found: ' + emails[0] + '.' : 'No working email found on this page. It may be on the contact page.';
     if (broken.length) {
@@ -650,7 +677,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     }
     var out = [
       item(G, 'email', 'Email', emails.length && !broken.length && !sample.length && !typo.length ? 'ok' : 'check', emailMsg, DOCS.editorial),
-      item(G, 'phone', 'Phone', phones.length && !samplePh.length ? 'ok' : 'check', phoneMsg, DOCS.editorial)
+      item(G, 'phone', 'Phone', phones.length && !samplePh.length && !shortPh.length ? 'ok' : 'check', phoneMsg, DOCS.editorial)
     ];
     if (social.length) {
       out.push(item(G, 'social-shopify', 'Social link', 'check',
@@ -676,6 +703,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     var typo = findTypoEmails(text, []);
     var sample = findSampleEmails(text, []);
     var samplePh = findSamplePhones(text, []);
+    var shortPh = findShortPhones(text, []);
     var notes = [];
     if (typo.length) {
       var ending = typo[0].split('.').pop();
@@ -687,6 +715,9 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     }
     if (samplePh.length) {
       notes.push('shows "' + samplePh[0] + '", which looks like a sample number left from a template rather than your own');
+    }
+    if (shortPh.length) {
+      notes.push('shows the phone number "' + shortPh[0] + '", which has only ' + shortPhoneDigits(shortPh[0]) + ' digits (a US number has 10), so it looks cut short and calls to it may not go through');
     }
     if (notes.length) {
       return item(G, 'contact-info-page', 'Contact information page', 'check', where + ' ' + notes.join('; it also ') + '.', DOCS.editorial);
@@ -751,7 +782,7 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
     parsePrice: parsePrice, evaluateProduct: evaluateProduct, comparePrices: comparePrices,
     collectPrices: collectPrices, matchPolicyLinks: matchPolicyLinks, findEmails: findEmails, findBrokenMailto: findBrokenMailto, findSampleEmails: findSampleEmails, findSamplePhones: findSamplePhones,
     findTypoEmails: findTypoEmails, findShopifySocialLinks: findShopifySocialLinks,
-    findPhones: findPhones, evaluateContacts: evaluateContacts, evaluateContactInfoPage: evaluateContactInfoPage, evaluateAlt: evaluateAlt,
+    findPhones: findPhones, findShortPhones: findShortPhones, evaluateContacts: evaluateContacts, evaluateContactInfoPage: evaluateContactInfoPage, evaluateAlt: evaluateAlt,
     summarize: summarize, runChecks: runChecks,
     analyzePolicyText: analyzePolicyText, detectPolicyEmbed: detectPolicyEmbed, evaluatePolicyPage: evaluatePolicyPage, policyContentTargets: policyContentTargets, comparePolicyVersions: comparePolicyVersions,
     microdataToNodes: microdataToNodes, mergeProducts: mergeProducts, isProductItemtype: isProductItemtype
