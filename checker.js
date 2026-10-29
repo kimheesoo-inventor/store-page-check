@@ -281,8 +281,9 @@ images: 'https://developers.google.com/search/docs/appearance/google-images'
       path: /\/policies\/privacy-policy|privacy/i, text: /privacy/i },
     { id: 'terms', label: 'Terms of service', ref: DOCS.editorial,
       path: /\/policies\/terms-of-service|terms/i, text: /\bterms\b/i },
+    /* Contact page words also cover common non-English stores: German/Danish/Swedish "Kontakt", Italian "Contatti", Portuguese "Contato" ("contact" already matches French/Spanish/Dutch "Contact(o|ez)"). */
     { id: 'contact', label: 'Contact page', ref: DOCS.editorial,
-      path: /\/pages\/contact|contact/i, text: /contact/i }
+      path: /\/pages\/contact|contact|kontakt|contat/i, text: /contact|kontakt|contat/i }
   ];
 
   function pathOf(href) {

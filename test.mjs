@@ -208,6 +208,12 @@ t('matchPolicyLinks: text only (custom URL) is recognized', () => {
   const r = c.matchPolicyLinks([{ href: '/pages/our-info', text: 'Returns' }, { href: '/p/info2', text: 'Shipping info' }]);
   assert.equal(st(r, 'policy-refund'), 'ok'); assert.equal(st(r, 'policy-shipping'), 'ok');
 });
+t('matchPolicyLinks: non-English contact page links (Kontakt, Contatti, Contato) are recognized', () => {
+  assert.equal(st(c.matchPolicyLinks([{ href: '/pages/kontakt', text: 'Kontakt' }]), 'policy-contact'), 'ok');
+  assert.equal(st(c.matchPolicyLinks([{ href: '/pages/info', text: 'Contatti' }]), 'policy-contact'), 'ok');
+  assert.equal(st(c.matchPolicyLinks([{ href: '/pages/fale-conosco', text: 'Contato' }]), 'policy-contact'), 'ok');
+  assert.equal(st(c.matchPolicyLinks([{ href: '/pages/about', text: 'About us' }]), 'policy-contact'), 'check');
+});
 t('matchPolicyLinks: no links -> all check', () => {
   assert.ok(c.matchPolicyLinks([]).every((x) => x.status === 'check'));
 });
