@@ -127,18 +127,43 @@
 </ul>
 
 <h2 id="privacy">Privacy</h2>
-<p>The checker runs inside your browser on the page you click it on. The checker itself has no analytics or tracking. Besides reading that page, it loads the store's own policy pages (refund, shipping, privacy, terms) from the same site with ordinary read-only requests, and it sends nothing to the author or anyone else. (Scripts the store page already runs, such as its own analytics, keep running as usual.) This page uses no external fonts or styles. Its only external script is Cloudflare Web Analytics, which, per Cloudflare, counts visits to this page without cookies or tracking of individual visitors; Cloudflare receives visitors' IP addresses but says it does not store them in core databases or logs. The checker itself does not load it. The code is a single readable file, <a href="checker.js">checker.js</a>.</p>
+<p>The checker runs inside your browser on the page you click it on. The checker itself has no analytics or tracking. Besides reading that page, it loads the store's own policy pages (refund, shipping, privacy, terms) from the same site with ordinary read-only requests, and it sends nothing to the author or anyone else. (Scripts the store page already runs, such as its own analytics, keep running as usual.) This page uses no external fonts or styles. Its only external script is Cloudflare Web Analytics, which, per Cloudflare, counts visits to this page without cookies or tracking of individual visitors; Cloudflare receives visitors' IP addresses but says it does not store them in core databases or logs. The checker itself does not load it. To count how many visitors try the tool, clicking or dragging the Store Page Check button, clicking the code box, or opening the feedback form changes this page's address to a short path ending in /e/.../, which Cloudflare Web Analytics counts as an anonymous page view; nothing you type is sent. Links in my emails may end in ?v= plus a short email-version label (the same label for everyone who got that version, not your name or address); the page moves that label into its address (/store-page-check/m/.../) so visits can be counted per email version. The code is a single readable file, <a href="/store-page-check/checker.js">checker.js</a>.</p>
 <p>The optional feedback form is a Google Form, so answers are stored in my Google account. Your email is asked for only if you agree to be contacted. I use it only to reply about this checker, never share or sell it, and delete it when you ask; I delete all form answers by 2027-04-30 at the latest. This page is hosted on GitHub Pages, and GitHub may keep standard visit logs such as IP addresses.</p>
 
 <h2 id="about">About</h2>
 <p>Made by Heesoo Kim, a solo developer in Korea, with help from AI coding assistants. The code is open source under the MIT license: <a href="https://github.com/kimheesoo-inventor/store-page-check">source on GitHub</a>. Questions: heesoo0204@gmail.com</p>
-<p>Optional feedback form (Google Forms): <a href="https://docs.google.com/forms/d/e/1FAIpQLSebX9s81Llx1WtSKnYXnJgUuB6eWWgvmgkTVD0lYAvVucyXgw/viewform">Store Page Check feedback</a></p>
+<p>Optional feedback form (Google Forms): <a data-step="/store-page-check/e/form-open/" href="https://docs.google.com/forms/d/e/1FAIpQLSebX9s81Llx1WtSKnYXnJgUuB6eWWgvmgkTVD0lYAvVucyXgw/viewform">Store Page Check feedback</a></p>
 
 <footer>
   <p><strong>Free, open-source checker. It reads the page you run it on and the store's own policy pages. Not affiliated with Google or Shopify. It does not guarantee Merchant Center approval or reinstatement. It sends nothing to the author or anyone else.</strong></p>
 </footer>
 
 </main>
+<script>
+/* Step count (landing page only, not the checker): see the privacy note above. */
+(function () {
+  function step(p) { try { if (location.pathname !== p) history.pushState(null, '', p); } catch (e) {} }
+  document.addEventListener('click', function (ev) {
+    var t = ev.target; if (!t || !t.closest) return;
+    var a;
+    if (t.closest('a.bm')) step('/store-page-check/e/bm-click/');
+    else if (t.closest('#bmtext')) step('/store-page-check/e/bm-copy/');
+    else if ((a = t.closest('a[data-step]'))) step(a.getAttribute('data-step'));
+  }, true);
+  document.addEventListener('dragstart', function (ev) {
+    var t = ev.target; if (t && t.closest && t.closest('a.bm')) step('/store-page-check/e/bm-drag/');
+  }, true);
+})();
+</script>
+<script>
+/* Email version label: ?v=... -> /store-page-check/m/.../ before analytics starts (see the note above). */
+(function () {
+  try {
+    var m = /[?&]v=(va|vb|vb2|vp)(?:&|$)/i.exec(location.search);
+    if (m && location.pathname === '/store-page-check/') history.replaceState(null, '', '/store-page-check/m/' + m[1].toLowerCase() + '/' + location.hash);
+  } catch (e) {}
+})();
+</script>
 <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "4369363e9e4d4454afa4218085daeb0b"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>
